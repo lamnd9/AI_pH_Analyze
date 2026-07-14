@@ -14,6 +14,9 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("backend")
 
+# Suppress thought_signature warnings from google-genai SDK
+logging.getLogger("google_genai").setLevel(logging.ERROR)
+
 app = FastAPI(
     title="LabPrint AI pH Analyze Backend",
     description="Python FastAPI backend for image analysis using the official Google GenAI SDK",

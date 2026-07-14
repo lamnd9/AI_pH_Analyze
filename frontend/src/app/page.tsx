@@ -39,51 +39,19 @@ interface UploadedFile {
 
 export default function Home() {
   const [currentStep, setCurrentStep] = useState<WorkflowStep>("upload");
-  const [lang, setLang] = useState<Language>("en"); // Language state (EN/VI)
+  const [lang, setLang] = useState<Language>("vi"); // Language state (EN/VI)
   const [isDragOver, setIsDragOver] = useState(false);
-  const [selectedCardId, setSelectedCardId] = useState<string>("mock-2"); // Middle card focused by default
+  const [selectedCardId, setSelectedCardId] = useState<string>(""); // Selected card focused reference
   const [zoomedFile, setZoomedFile] = useState<UploadedFile | null>(null); // For detail zoom overlay modal
+  const [scale, setScale] = useState(1); // A4 preview zoom scale for mobile layout
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Retrieve localization strings based on selected language state
   const t = useMemo(() => translations[lang], [lang]);
 
-  // Initial mock data configured to match the user's layout image
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([
-    {
-      id: "mock-1",
-      name: "Sample_3878_16_Run1.jpg",
-      size: "2.4 MB",
-      previewUrl: "/sample_a1.jpg", // pH 6.469 image
-      type: "image/jpeg",
-      sampleId: "3884/26",
-      run: "Run 1",
-      confidence: 98,
-      status: "Recognized",
-    },
-    {
-      id: "mock-2",
-      name: "Sample_3884_26_Run2.png",
-      size: "1.8 MB",
-      previewUrl: "/sample_b2.png", // pH 6.113 image
-      type: "image/png",
-      sampleId: "3884/26",
-      run: "Run 2",
-      confidence: 82,
-      status: "Edited",
-    },
-    {
-      id: "mock-3",
-      name: "Sample_3880_16.jpg",
-      size: "2.9 MB",
-      previewUrl: "/slide_sample.jpg",
-      type: "image/jpeg",
-      sampleId: "3880/16",
-      run: "Run 1",
-      confidence: 99,
-      status: "Recognized",
-    },
-  ]);
+  // Initial file list (starts empty for production use)
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
   // Auto-grouping algorithm: aggregate images by Sample ID (trimmed, case-insensitive)
   const groupedSamples = useMemo(() => {
@@ -150,6 +118,27 @@ export default function Home() {
     });
     return warnings;
   }, [groupedSamples, lang, t]);
+
+  // Calculate A4 preview zoom scale dynamically to fit screen width (mobile zoom)
+  React.useEffect(() => {
+    const handleResize = () => {
+      if (containerRef.current) {
+        const containerWidth = containerRef.current.getBoundingClientRect().width;
+        const targetWidth = 794; // 210mm in pixels at standard 96dpi is ~794px
+        // If container is smaller than A4 page width, scale it down to fit
+        if (containerWidth < targetWidth) {
+          setScale(containerWidth / targetWidth);
+        } else {
+          setScale(1);
+        }
+      }
+    };
+
+    // Run on mount, resize, and when currentStep changes
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [currentStep]);
 
   // Handle drag and drop files
   const handleDragOver = (e: React.DragEvent) => {
@@ -345,6 +334,12 @@ export default function Home() {
             box-shadow: none !important;
             border: none !important;
           }
+          .print-wrapper {
+            height: auto !important;
+            width: auto !important;
+            display: block !important;
+            transform: none !important;
+          }
           .print-page {
             width: 210mm !important;
             height: 297mm !important;
@@ -356,6 +351,8 @@ export default function Home() {
             page-break-after: always !important;
             display: flex !important;
             flex-direction: column !important;
+            transform: none !important;
+            transform-origin: initial !important;
           }
         }
       `}} />
@@ -820,7 +817,7 @@ export default function Home() {
               )}
 
               {/* Virtual A4 Previews Wrapper */}
-              <div className="space-y-12 print-area">
+              <div ref={containerRef} className="space-y-12 print-area w-full flex flex-col items-center">
                 {Object.keys(groupedSamples).map((sampleKey, groupIdx) => {
                   const groupFiles = groupedSamples[sampleKey];
                   const sampleDisplayId = groupFiles[0].sampleId;
@@ -835,93 +832,93 @@ export default function Home() {
                         <span>{t.step3.pageText} {groupIdx + 1} {t.step3.ofText} {Object.keys(groupedSamples).length}</span>
                       </div>
 
-                      {/* PORTRAIT A4 SIMULATED PAGE CONTAINER */}
-                      <div className="print-page w-full max-w-[210mm] aspect-[1/1.414] bg-white border border-slate-200 shadow-xl rounded-lg mx-auto p-[18mm] flex flex-col justify-between transition-all duration-300">
-                        <div>
-                          
-                          {/* Report Header block */}
-                          <div className="flex items-start justify-between border-b border-slate-300 pb-4 mb-6">
-                            <div>
-                              <h2 className="text-xl font-black text-blue-900 tracking-tight leading-none uppercase">
-                                {t.step3.a4Title}
-                              </h2>
-                              <span className="text-[9px] font-bold text-slate-400 tracking-widest uppercase block mt-1">
-                                {t.step3.a4Sub}
-                              </span>
-                            </div>
-                            <div className="text-right font-mono text-xs text-slate-600 space-y-0.5">
-                              <div>Date: <span className="font-semibold text-slate-800">{currentDate}</span></div>
-                              <div>Sample ID: <span className="font-bold text-blue-900">{sampleDisplayId}</span></div>
-                            </div>
-                          </div>
-
-                          {/* Report Metadata block */}
-                          <div className="grid grid-cols-2 gap-4 text-xs mb-8 border-b border-slate-100 pb-4">
-                            <div>
-                              <span className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider mb-0.5">{t.step3.patientName}</span>
-                              <span className="font-semibold text-slate-800">Doe, Jane</span>
-                            </div>
-                            <div>
-                              <span className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider mb-0.5">{t.step3.assayProtocol}</span>
-                              <span className="font-semibold text-slate-800">High-Resolution Microscopic Analysis V4.2</span>
-                            </div>
-                          </div>
-
-                          {/* Two-Column Image Grid */}
-                          <div className="grid grid-cols-2 gap-6">
+                      {/* Zooming scaling container wrapper for mobile responsiveness, preserving A4 aspect ratio */}
+                      <div 
+                        className="print-wrapper w-full flex justify-center"
+                        style={scale < 1 ? { height: `${1123 * scale}px` } : {}}
+                      >
+                        {/* PORTRAIT A4 SIMULATED PAGE CONTAINER */}
+                        <div 
+                          className="print-page w-[210mm] min-h-[297mm] bg-white border border-slate-200 shadow-xl rounded-lg p-[18mm] flex flex-col justify-between transition-all duration-300 shrink-0"
+                          style={{
+                            transform: scale < 1 ? `scale(${scale})` : "none",
+                            transformOrigin: "top center",
+                          }}
+                        >
+                          <div>
                             
-                            {/* Run 1 Col */}
-                            <div className="space-y-3">
-                              <div className="aspect-[4/3] w-full rounded border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center">
-                                {run1Specimen ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={run1Specimen.previewUrl}
-                                    alt={`${sampleDisplayId} Run 1`}
-                                    className="w-full h-full object-cover filter grayscale"
-                                  />
-                                ) : (
-                                  <div className="flex flex-col items-center justify-center p-4 text-center text-slate-300 font-mono text-[10px]">
-                                    <AlertCircle className="w-6 h-6 mb-1 text-slate-200" />
-                                    <span>{t.step3.missingRunText}</span>
-                                  </div>
-                                )}
+                            {/* Report Header block */}
+                            <div className="flex items-start justify-between border-b border-slate-300 pb-4 mb-6">
+                              <div>
+                                <h2 className="text-xl font-black text-blue-900 tracking-tight leading-none uppercase">
+                                  {t.step3.a4Title}
+                                </h2>
+                                <span className="text-[9px] font-bold text-slate-400 tracking-widest uppercase block mt-1">
+                                  {t.step3.a4Sub}
+                                </span>
                               </div>
-                              <span className="block text-center font-mono text-[10px] text-slate-500 font-medium">
-                                {t.step3.fig1} {run1Specimen ? `(${lang === "vi" ? "Lần 1" : "Run 1"})` : ""}
-                              </span>
+                              <div className="text-right font-mono text-xs text-slate-600 space-y-0.5">
+                                <div>Date: <span className="font-semibold text-slate-800">{currentDate}</span></div>
+                                <div>Sample ID: <span className="font-bold text-blue-900">{sampleDisplayId}</span></div>
+                              </div>
                             </div>
 
-                            {/* Run 2 Col */}
-                            <div className="space-y-3">
-                              <div className="aspect-[4/3] w-full rounded border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center">
-                                {run2Specimen ? (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={run2Specimen.previewUrl}
-                                    alt={`${sampleDisplayId} Run 2`}
-                                    className="w-full h-full object-cover filter grayscale"
-                                  />
-                                ) : (
-                                  <div className="flex flex-col items-center justify-center p-4 text-center text-slate-300 font-mono text-[10px]">
-                                    <AlertCircle className="w-6 h-6 mb-1 text-slate-200" />
-                                    <span>{t.step3.missingRunText}</span>
-                                  </div>
-                                )}
+                            {/* Two-Column Image Grid */}
+                            <div className="grid grid-cols-2 gap-6">
+                              
+                              {/* Run 1 Col */}
+                              <div className="space-y-3">
+                                <div className="aspect-[4/3] w-full rounded border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center">
+                                  {run1Specimen ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={run1Specimen.previewUrl}
+                                      alt={`${sampleDisplayId} Run 1`}
+                                      className="w-full h-full object-cover filter grayscale"
+                                    />
+                                  ) : (
+                                    <div className="flex flex-col items-center justify-center p-4 text-center text-slate-300 font-mono text-[10px]">
+                                      <AlertCircle className="w-6 h-6 mb-1 text-slate-200" />
+                                      <span>{t.step3.missingRunText}</span>
+                                    </div>
+                                  )}
+                                </div>
+                                <span className="block text-center font-mono text-[10px] text-slate-500 font-medium">
+                                  {t.step3.fig1} {run1Specimen ? `(${lang === "vi" ? "Lần 1" : "Run 1"})` : ""}
+                                </span>
                               </div>
-                              <span className="block text-center font-mono text-[10px] text-slate-500 font-medium">
-                                {t.step3.fig2} {run2Specimen ? `(${lang === "vi" ? "Lần 2" : "Run 2"})` : ""}
-                              </span>
+
+                              {/* Run 2 Col */}
+                              <div className="space-y-3">
+                                <div className="aspect-[4/3] w-full rounded border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center">
+                                  {run2Specimen ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={run2Specimen.previewUrl}
+                                      alt={`${sampleDisplayId} Run 2`}
+                                      className="w-full h-full object-cover filter grayscale"
+                                    />
+                                  ) : (
+                                    <div className="flex flex-col items-center justify-center p-4 text-center text-slate-300 font-mono text-[10px]">
+                                      <AlertCircle className="w-6 h-6 mb-1 text-slate-200" />
+                                      <span>{t.step3.missingRunText}</span>
+                                    </div>
+                                  )}
+                                </div>
+                                <span className="block text-center font-mono text-[10px] text-slate-500 font-medium">
+                                  {t.step3.fig2} {run2Specimen ? `(${lang === "vi" ? "Lần 2" : "Run 2"})` : ""}
+                                </span>
+                              </div>
+
                             </div>
 
                           </div>
 
-                        </div>
-
-                        {/* A4 Report Footer details */}
-                        <div className="border-t border-slate-200 pt-3 flex items-center justify-between text-[9px] font-mono text-slate-400">
-                          <span>SYSTEM INTEGRITY: VERIFIED</span>
-                          <span>LABPRINT CLINICAL OUTPUT SUITE</span>
+                          {/* A4 Report Footer details */}
+                          <div className="border-t border-slate-200 pt-3 flex items-center justify-between text-[9px] font-mono text-slate-400">
+                            <span>SYSTEM INTEGRITY: VERIFIED</span>
+                            <span>LABPRINT CLINICAL OUTPUT SUITE</span>
+                          </div>
                         </div>
                       </div>
                     </div>

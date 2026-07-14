@@ -16,8 +16,10 @@ import {
   AlertTriangle,
   Search,
   Pencil,
-  ArrowRight
+  ArrowRight,
+  RefreshCw
 } from "lucide-react";
+import { translations, Language } from "./translations";
 
 // Definitions for steps in workflow
 type WorkflowStep = "upload" | "review" | "print";
@@ -31,18 +33,22 @@ interface UploadedFile {
   sampleId: string;       // AI recognized or user edited sample ID
   run: "Run 1" | "Run 2"; // selected measurement run
   confidence: number;     // AI recognition confidence
-  status: "Recognized" | "Edited";
+  status: "Recognized" | "Edited" | "Scanning" | "Error";
+  file?: File;            // Keep original File reference for API uploading
 }
 
 export default function Home() {
-  const [currentStep, setCurrentStep] = useState<WorkflowStep>("print"); // Set default step to "print" (Step 3) to match current user request
+  const [currentStep, setCurrentStep] = useState<WorkflowStep>("upload");
+  const [lang, setLang] = useState<Language>("en"); // Language state (EN/VI)
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedCardId, setSelectedCardId] = useState<string>("mock-2"); // Middle card focused by default
   const [zoomedFile, setZoomedFile] = useState<UploadedFile | null>(null); // For detail zoom overlay modal
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Retrieve localization strings based on selected language state
+  const t = useMemo(() => translations[lang], [lang]);
+
   // Initial mock data configured to match the user's layout image
-  // Let's use the actual photos of pH meters for previewUrl so they show the realistic test setups
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([
     {
       id: "mock-1",
@@ -50,7 +56,7 @@ export default function Home() {
       size: "2.4 MB",
       previewUrl: "/sample_a1.jpg", // pH 6.469 image
       type: "image/jpeg",
-      sampleId: "3884/26", // Set sample ID to match A4 report preview layout image
+      sampleId: "3884/26",
       run: "Run 1",
       confidence: 98,
       status: "Recognized",
@@ -83,6 +89,8 @@ export default function Home() {
   const groupedSamples = useMemo(() => {
     const groups: { [key: string]: UploadedFile[] } = {};
     uploadedFiles.forEach((file) => {
+      // Only group fully processed files
+      if (file.status === "Scanning" || file.status === "Error") return;
       const key = file.sampleId.trim().toLowerCase();
       if (!groups[key]) {
         groups[key] = [];
@@ -92,36 +100,56 @@ export default function Home() {
     return groups;
   }, [uploadedFiles]);
 
-  // Anomalies Detection Logic
+  // Localized Anomalies Detection Logic
   const anomalies = useMemo(() => {
     const warnings: string[] = [];
     Object.keys(groupedSamples).forEach((key) => {
       const files = groupedSamples[key];
       const sampleIdLabel = files[0].sampleId; // Display name
+      
+      const missingRunLabel = files[0].run === "Run 1" ? t.step2.run2 : t.step2.run1;
 
       if (files.length === 1) {
-        warnings.push(
-          `Sample ID "${sampleIdLabel}" is missing a run. Only ${files[0].run} is present in the database.`
-        );
+        if (lang === "vi") {
+          warnings.push(
+            `Mã số mẫu "${sampleIdLabel}" bị thiếu một lần đo. Chỉ có ${missingRunLabel} trong cơ sở dữ liệu.`
+          );
+        } else {
+          warnings.push(
+            `Sample ID "${sampleIdLabel}" is missing a run. Only ${files[0].run} is present in the database.`
+          );
+        }
       } else {
         const runs = files.map((f) => f.run);
         const run1Count = runs.filter((r) => r === "Run 1").length;
         const run2Count = runs.filter((r) => r === "Run 2").length;
 
         if (run1Count > 1 || run2Count > 1) {
-          warnings.push(
-            `Sample ID "${sampleIdLabel}" contains duplicate runs (multiple files are mapped to the same Run number).`
-          );
+          if (lang === "vi") {
+            warnings.push(
+              `Mã số mẫu "${sampleIdLabel}" chứa các lần đo trùng lặp (nhiều tệp đang cùng ánh xạ tới một Lần đo).`
+            );
+          } else {
+            warnings.push(
+              `Sample ID "${sampleIdLabel}" contains duplicate runs (multiple files are mapped to the same Run number).`
+            );
+          }
         }
         if (files.length > 2) {
-          warnings.push(
-            `Sample ID "${sampleIdLabel}" has ${files.length} runs (clinical standards allow max. 2 runs per specimen sheet).`
-          );
+          if (lang === "vi") {
+            warnings.push(
+              `Mã số mẫu "${sampleIdLabel}" có ${files.length} lần đo (tiêu chuẩn lâm sàng cho phép tối đa 2 lần đo cho mỗi tờ báo cáo).`
+            );
+          } else {
+            warnings.push(
+              `Sample ID "${sampleIdLabel}" has ${files.length} runs (clinical standards allow max. 2 runs per specimen sheet).`
+            );
+          }
         }
       }
     });
     return warnings;
-  }, [groupedSamples]);
+  }, [groupedSamples, lang, t]);
 
   // Handle drag and drop files
   const handleDragOver = (e: React.DragEvent) => {
@@ -165,8 +193,9 @@ export default function Home() {
         type: file.type,
         sampleId: `${generatedNumber}/16`,
         run: "Run 1",
-        confidence: Math.floor(Math.random() * 15) + 85,
+        confidence: 0,
         status: "Recognized",
+        file, // Keep the file reference for API uploading
       });
     }
 
@@ -200,15 +229,93 @@ export default function Home() {
     );
   };
 
-  // Print execution handler
-  const handlePrint = () => {
-    window.print();
+  // Start Real AI Gemini Recognition loop
+  const handleStartRecognition = async () => {
+    // Transition to Step 2 view
+    setCurrentStep("review");
+
+    // Map files to "Scanning" status
+    setUploadedFiles((prev) =>
+      prev.map((f) => ({
+        ...f,
+        status: "Scanning",
+      }))
+    );
+
+    // Call API for each file in parallel
+    uploadedFiles.forEach((file) => {
+      analyzeFile(file);
+    });
+  };
+
+  // Asynchronous fetch calling the FastAPI endpoint (includes dynamic ?lang parameter)
+  const analyzeFile = async (file: UploadedFile) => {
+    try {
+      let fileToUpload: File;
+
+      if (file.file) {
+        fileToUpload = file.file;
+      } else {
+        // For mock files, fetch the asset blob and construct a File object
+        const response = await fetch(file.previewUrl);
+        const blob = await response.blob();
+        fileToUpload = new File([blob], file.name, { type: file.type || "image/jpeg" });
+      }
+
+      const formData = new FormData();
+      formData.append("file", fileToUpload);
+
+      // Call API (Proxied automatically with lang parameter appended)
+      const res = await fetch(`/api/analyze-image?lang=${lang}`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || "Analysis server error");
+      }
+
+      // Successful analysis structure: { sample_id, measurement_run, confidence }
+      const data = await res.json();
+      
+      setUploadedFiles((prev) =>
+        prev.map((f) =>
+          f.id === file.id
+            ? {
+                ...f,
+                sampleId: data.sample_id,
+                run: data.measurement_run === 2 ? "Run 2" : "Run 1",
+                confidence: Math.round(data.confidence * 100),
+                status: "Recognized",
+              }
+            : f
+        )
+      );
+    } catch (err) {
+      console.error(`Gemini OCR failed for file ${file.name}:`, err);
+      setUploadedFiles((prev) =>
+        prev.map((f) =>
+          f.id === file.id
+            ? {
+                ...f,
+                status: "Error",
+              }
+            : f
+        )
+      );
+    }
   };
 
   // Format current date for Clinical Report Page
   const currentDate = useMemo(() => {
     return new Date().toISOString().split("T")[0];
   }, []);
+
+  // Print execution handler
+  const handlePrint = () => {
+    window.print();
+  };
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
@@ -267,18 +374,45 @@ export default function Home() {
           </span>
         </div>
 
-        {/* User profile avatar (circular) */}
-        <div className="flex items-center gap-4">
-          <div className="flex flex-col items-end hidden md:block">
-            <span className="text-xs font-semibold text-slate-800">Dr. Duy Lam</span>
-            <span className="text-[10px] text-slate-500 font-mono">ID: CLIN-7890</span>
+        {/* Top Right Layout Options */}
+        <div className="flex items-center gap-3">
+          
+          {/* Language Switcher EN/VI */}
+          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+            <button
+              onClick={() => setLang("en")}
+              className={`px-2 py-1 rounded text-[10px] font-extrabold transition-all duration-200 ${
+                lang === "en" ? "bg-white text-blue-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              EN
+            </button>
+            <button
+              onClick={() => setLang("vi")}
+              className={`px-2 py-1 rounded text-[10px] font-extrabold transition-all duration-200 ${
+                lang === "vi" ? "bg-white text-blue-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              VI
+            </button>
           </div>
-          <div className="relative group cursor-pointer">
-            <div className="w-10 h-10 overflow-hidden rounded-full ring-2 ring-blue-100 transition-all duration-300 group-hover:ring-blue-300 bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold">
-              DL
+
+          <div className="h-6 w-px bg-slate-200"></div>
+
+          {/* User profile avatar */}
+          <div className="flex items-center gap-3">
+            <div className="flex flex-col items-end hidden md:block">
+              <span className="text-xs font-bold text-slate-800">{t.common.avatarLabel}</span>
+              <span className="text-[10px] text-slate-500 font-mono">ID: CLIN-7890</span>
             </div>
-            <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full"></span>
+            <div className="relative group cursor-pointer">
+              <div className="w-10 h-10 overflow-hidden rounded-full ring-2 ring-blue-100 transition-all duration-300 group-hover:ring-blue-300 bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold">
+                DL
+              </div>
+              <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full"></span>
+            </div>
           </div>
+
         </div>
       </header>
 
@@ -290,7 +424,7 @@ export default function Home() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xs font-bold uppercase tracking-wider text-blue-950 mb-3">
-                Workflow Steps
+                {t.sidebar.workflowSteps}
               </h2>
               <nav className="space-y-1.5">
                 {/* Step 1: Upload & Preview */}
@@ -303,7 +437,7 @@ export default function Home() {
                   }`}
                 >
                   <UploadCloud className={`w-4 h-4 ${currentStep === "upload" ? "text-blue-900" : "text-slate-400"}`} />
-                  <span>Upload & Preview</span>
+                  <span>{t.sidebar.upload}</span>
                 </button>
 
                 {/* Step 2: Review & Edit */}
@@ -316,7 +450,7 @@ export default function Home() {
                   }`}
                 >
                   <Table className={`w-4 h-4 ${currentStep === "review" ? "text-blue-900" : "text-slate-400"}`} />
-                  <span>Review & Edit</span>
+                  <span>{t.sidebar.review}</span>
                 </button>
 
                 {/* Step 3: Grouping & Print */}
@@ -329,7 +463,7 @@ export default function Home() {
                   }`}
                 >
                   <Printer className={`w-4 h-4 ${currentStep === "print" ? "text-blue-900" : "text-slate-400"}`} />
-                  <span>Grouping & Print</span>
+                  <span>{t.sidebar.print}</span>
                 </button>
               </nav>
             </div>
@@ -338,15 +472,15 @@ export default function Home() {
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
               <div className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
                 <TrendingUp className="w-3.5 h-3.5 text-blue-600" />
-                <span>Session Stats</span>
+                <span>{t.sidebar.sessionStats}</span>
               </div>
               <div className="space-y-1.5 font-mono text-xs">
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Total Samples:</span>
+                  <span className="text-slate-400">{t.sidebar.totalSamples}</span>
                   <span className="font-semibold text-slate-700">{uploadedFiles.length}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Total Groups:</span>
+                  <span className="text-slate-400">{t.sidebar.totalGroups}</span>
                   <span className="font-semibold text-blue-600">{Object.keys(groupedSamples).length}</span>
                 </div>
               </div>
@@ -366,10 +500,10 @@ export default function Home() {
             <div className="max-w-5xl w-full mx-auto space-y-8 animate-fadeIn no-print">
               <div>
                 <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-                  Upload Sample Data
+                  {t.step1.title}
                 </h1>
                 <p className="text-sm text-slate-500 mt-1.5">
-                  Drag and drop lab sample images or structured data to begin recognition.
+                  {t.step1.subtitle}
                 </p>
               </div>
 
@@ -398,10 +532,10 @@ export default function Home() {
                 </div>
                 
                 <p className="text-sm font-semibold text-slate-700">
-                  Click to upload or drag and drop
+                  {t.step1.clickUpload}
                 </p>
                 <p className="text-xs text-slate-400 mt-1">
-                  SVG, PNG, JPG or DICOM (max. 800×400px)
+                  {t.step1.fileFormats}
                 </p>
               </div>
 
@@ -409,16 +543,16 @@ export default function Home() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
-                    Recent Uploads (Mock)
+                    {t.step1.recentUploads}
                   </h3>
                   
                   {uploadedFiles.length > 0 && (
                     <button
-                      onClick={() => setCurrentStep("review")}
+                      onClick={handleStartRecognition}
                       className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-white rounded-xl bg-blue-900 hover:bg-blue-800 transition-colors shadow-sm active:scale-95"
                     >
                       <Sparkles className="w-4 h-4 fill-white/20" />
-                      <span>Start AI Recognition</span>
+                      <span>{t.step1.startAI}</span>
                     </button>
                   )}
                 </div>
@@ -426,7 +560,7 @@ export default function Home() {
                 {uploadedFiles.length === 0 ? (
                   <div className="flex flex-col items-center justify-center p-12 bg-white rounded-2xl border border-slate-200 text-slate-400">
                     <FileText className="w-10 h-10 text-slate-300 mb-3" />
-                    <p className="text-sm font-semibold">No files uploaded yet</p>
+                    <p className="text-sm font-semibold">{t.step1.noFiles}</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
@@ -475,10 +609,10 @@ export default function Home() {
             <div className="max-w-6xl w-full mx-auto space-y-8 animate-fadeIn no-print">
               <div>
                 <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-                  Review & Edit Recognized Data
+                  {t.step2.title}
                 </h1>
                 <p className="text-sm text-slate-500 mt-1.5">
-                  Verify automated recognition results against source specimens. Make corrections as necessary before grouping.
+                  {t.step2.subtitle}
                 </p>
               </div>
 
@@ -497,6 +631,7 @@ export default function Home() {
                           : "border-slate-200"
                       }`}
                     >
+                      {/* Top Image Container */}
                       <div className="relative aspect-video w-full overflow-hidden bg-slate-100 border-b border-slate-100">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
@@ -504,7 +639,7 @@ export default function Home() {
                           alt={file.name}
                           className="w-full h-full object-cover"
                         />
-                        <div className={`absolute inset-0 bg-slate-950/20 flex items-center justify-center transition-opacity duration-200 ${
+                        <div className={`absolute inset-0 bg-slate-950/20 flex items-center justify-center transition-opacity duration-205 ${
                           file.id !== "mock-1" ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                         }`}>
                           <button
@@ -519,16 +654,43 @@ export default function Home() {
                         </div>
                       </div>
 
-                      <div className="p-5 space-y-4">
-                        <div className="flex items-center justify-between">
-                          {file.status === "Recognized" ? (
-                            <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded bg-emerald-50 text-emerald-700 border border-emerald-100">
-                              Recognized
+                      {/* Content Panel */}
+                      <div className="relative p-5 space-y-4 min-h-[220px]">
+                        
+                        {/* Scanning Loader Overlay */}
+                        {file.status === "Scanning" && (
+                          <div className="absolute inset-0 z-10 bg-white/80 backdrop-blur-[1px] flex flex-col items-center justify-center space-y-2 rounded-b-xl">
+                            <RefreshCw className="w-7 h-7 text-blue-900 animate-spin" />
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest animate-pulse">
+                              {t.step2.extracting}
                             </span>
-                          ) : (
+                          </div>
+                        )}
+
+                        {/* Status Row */}
+                        <div className="flex items-center justify-between">
+                          {/* Badge Dynamic Rendering */}
+                          {file.status === "Recognized" && (
+                            <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded bg-emerald-50 text-emerald-700 border border-emerald-100">
+                              {t.step2.recognized}
+                            </span>
+                          )}
+                          {file.status === "Edited" && (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-blue-50 text-blue-700 border border-blue-100">
                               <Pencil className="w-3 h-3" />
-                              Edited
+                              {t.step2.edited}
+                            </span>
+                          )}
+                          {file.status === "Scanning" && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-amber-50 text-amber-700 border border-amber-100">
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                              {t.step2.scanning}
+                            </span>
+                          )}
+                          {file.status === "Error" && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-rose-50 text-rose-700 border border-rose-100">
+                              <AlertCircle className="w-3.5 h-3.5" />
+                              {t.step2.ocrError}
                             </span>
                           )}
 
@@ -537,26 +699,30 @@ export default function Home() {
                           </span>
                         </div>
 
+                        {/* Sample ID Input Field */}
                         <div className="space-y-1.5">
                           <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                            Sample ID
+                            {t.step2.sampleId}
                           </label>
                           <input
                             type="text"
                             value={file.sampleId}
+                            disabled={file.status === "Scanning"}
                             onClick={(e) => e.stopPropagation()}
                             onChange={(e) => handleSampleIdChange(file.id, e.target.value)}
-                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white font-semibold focus:outline-none focus:ring-1 focus:ring-blue-900 focus:border-blue-900 transition-shadow"
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white font-semibold focus:outline-none focus:ring-1 focus:ring-blue-900 focus:border-blue-900 transition-shadow disabled:bg-slate-50 disabled:text-slate-400"
                           />
                         </div>
 
+                        {/* Measurement Run Selector */}
                         <div className="space-y-1.5">
                           <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                            Measurement Run
+                            {t.step2.measurementRun}
                           </label>
                           <div className="bg-slate-100 p-0.5 rounded-lg flex gap-0.5 border border-slate-200/50">
                             <button
                               type="button"
+                              disabled={file.status === "Scanning"}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleRunToggle(file.id, "Run 1");
@@ -565,12 +731,13 @@ export default function Home() {
                                 file.run === "Run 1"
                                   ? "bg-white shadow-sm font-bold text-slate-900"
                                   : "text-slate-500 hover:text-slate-900"
-                              }`}
+                              } disabled:opacity-50`}
                             >
-                              Run 1
+                              {t.step2.run1}
                             </button>
                             <button
                               type="button"
+                              disabled={file.status === "Scanning"}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleRunToggle(file.id, "Run 2");
@@ -579,27 +746,30 @@ export default function Home() {
                                 file.run === "Run 2"
                                   ? "bg-white shadow-sm font-bold text-slate-900"
                                   : "text-slate-500 hover:text-slate-900"
-                              }`}
+                              } disabled:opacity-50`}
                             >
-                              Run 2
+                              {t.step2.run2}
                             </button>
                           </div>
                         </div>
+
                       </div>
                     </div>
                   );
                 })}
               </div>
 
+              {/* Bottom Action Area */}
               <div className="flex justify-end pt-4">
                 <button
                   onClick={() => setCurrentStep("print")}
                   className="inline-flex items-center gap-2 px-6 py-3.5 text-sm font-bold tracking-wider text-white rounded-xl bg-blue-900 hover:bg-blue-800 transition-all shadow-md active:scale-[0.98]"
                 >
-                  <span>Group & Generate Print Sheets</span>
+                  <span>{t.step2.btnProceed}</span>
                   <ArrowRight className="w-4 h-4 stroke-[2.2]" />
                 </button>
               </div>
+
             </div>
           )}
 
@@ -611,10 +781,10 @@ export default function Home() {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 pb-5 no-print">
                 <div>
                   <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-                    Final Review & Grouping
+                    {t.step3.title}
                   </h1>
                   <p className="text-sm text-slate-500 mt-1.5">
-                    Review anomalies and preview final A4 output before printing.
+                    {t.step3.subtitle}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -622,24 +792,24 @@ export default function Home() {
                     onClick={() => setCurrentStep("review")}
                     className="px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-all shadow-sm active:scale-95"
                   >
-                    Back to Edit
+                    {t.step3.btnBack}
                   </button>
                   <button
                     onClick={handlePrint}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-blue-900 hover:bg-blue-800 rounded-xl transition-all shadow-sm shadow-blue-950/20 active:scale-95"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-blue-900 hover:bg-blue-800 rounded-xl transition-all shadow-sm active:scale-95"
                   >
                     <Printer className="w-4 h-4" />
-                    <span>Print All Pages</span>
+                    <span>{t.step3.btnPrint}</span>
                   </button>
                 </div>
               </div>
 
-              {/* Anomalies Warnings Panel (Crucial Business Logic) */}
+              {/* Anomalies Warnings Panel */}
               {anomalies.length > 0 && (
-                <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 space-y-2.5 shadow-sm no-print animate-shake">
+                <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 space-y-2.5 shadow-sm no-print">
                   <div className="flex items-center gap-2 text-sm font-bold text-amber-900">
                     <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-                    <span>Specimen Validation Warnings ({anomalies.length})</span>
+                    <span>{t.step3.warningHeader} ({anomalies.length})</span>
                   </div>
                   <ul className="text-xs list-disc pl-5 space-y-1 text-amber-800/90 font-medium">
                     {anomalies.map((warning, index) => (
@@ -655,16 +825,14 @@ export default function Home() {
                   const groupFiles = groupedSamples[sampleKey];
                   const sampleDisplayId = groupFiles[0].sampleId;
                   
-                  // Sort specimens by run to position Run 1 left and Run 2 right
                   const run1Specimen = groupFiles.find(f => f.run === "Run 1");
                   const run2Specimen = groupFiles.find(f => f.run === "Run 2");
 
                   return (
                     <div key={sampleKey} className="space-y-3">
-                      {/* Virtual A4 Header details (Page counter) */}
                       <div className="flex items-center justify-between font-mono text-[10px] text-slate-400 uppercase tracking-widest px-2 no-print">
-                        <span>Virtual A4 Report Preview</span>
-                        <span>Page {groupIdx + 1} of {Object.keys(groupedSamples).length}</span>
+                        <span>{t.step3.previewHeader}</span>
+                        <span>{t.step3.pageText} {groupIdx + 1} {t.step3.ofText} {Object.keys(groupedSamples).length}</span>
                       </div>
 
                       {/* PORTRAIT A4 SIMULATED PAGE CONTAINER */}
@@ -675,10 +843,10 @@ export default function Home() {
                           <div className="flex items-start justify-between border-b border-slate-300 pb-4 mb-6">
                             <div>
                               <h2 className="text-xl font-black text-blue-900 tracking-tight leading-none uppercase">
-                                Laboratory Report - Test Results
+                                {t.step3.a4Title}
                               </h2>
                               <span className="text-[9px] font-bold text-slate-400 tracking-widest uppercase block mt-1">
-                                Clinical Precision Division
+                                {t.step3.a4Sub}
                               </span>
                             </div>
                             <div className="text-right font-mono text-xs text-slate-600 space-y-0.5">
@@ -690,11 +858,11 @@ export default function Home() {
                           {/* Report Metadata block */}
                           <div className="grid grid-cols-2 gap-4 text-xs mb-8 border-b border-slate-100 pb-4">
                             <div>
-                              <span className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider mb-0.5">Patient Name</span>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider mb-0.5">{t.step3.patientName}</span>
                               <span className="font-semibold text-slate-800">Doe, Jane</span>
                             </div>
                             <div>
-                              <span className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider mb-0.5">Assay Protocol</span>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase block tracking-wider mb-0.5">{t.step3.assayProtocol}</span>
                               <span className="font-semibold text-slate-800">High-Resolution Microscopic Analysis V4.2</span>
                             </div>
                           </div>
@@ -710,18 +878,17 @@ export default function Home() {
                                   <img
                                     src={run1Specimen.previewUrl}
                                     alt={`${sampleDisplayId} Run 1`}
-                                    className="w-full h-full object-cover filter grayscale" // Grayscale filter to match layout design
+                                    className="w-full h-full object-cover filter grayscale"
                                   />
                                 ) : (
                                   <div className="flex flex-col items-center justify-center p-4 text-center text-slate-300 font-mono text-[10px]">
                                     <AlertCircle className="w-6 h-6 mb-1 text-slate-200" />
-                                    <span>MISSING RUN 1</span>
-                                    <span>SPECIMEN</span>
+                                    <span>{t.step3.missingRunText}</span>
                                   </div>
                                 )}
                               </div>
                               <span className="block text-center font-mono text-[10px] text-slate-500 font-medium">
-                                Fig 1. Measurement 1 {run1Specimen ? `(${run1Specimen.run})` : "(Missing)"}
+                                {t.step3.fig1} {run1Specimen ? `(${lang === "vi" ? "Lần 1" : "Run 1"})` : ""}
                               </span>
                             </div>
 
@@ -733,18 +900,17 @@ export default function Home() {
                                   <img
                                     src={run2Specimen.previewUrl}
                                     alt={`${sampleDisplayId} Run 2`}
-                                    className="w-full h-full object-cover filter grayscale" // Grayscale filter to match layout design
+                                    className="w-full h-full object-cover filter grayscale"
                                   />
                                 ) : (
                                   <div className="flex flex-col items-center justify-center p-4 text-center text-slate-300 font-mono text-[10px]">
                                     <AlertCircle className="w-6 h-6 mb-1 text-slate-200" />
-                                    <span>MISSING RUN 2</span>
-                                    <span>SPECIMEN</span>
+                                    <span>{t.step3.missingRunText}</span>
                                   </div>
                                 )}
                               </div>
                               <span className="block text-center font-mono text-[10px] text-slate-500 font-medium">
-                                Fig 2. Measurement 2 {run2Specimen ? `(${run2Specimen.run})` : "(Missing)"}
+                                {t.step3.fig2} {run2Specimen ? `(${lang === "vi" ? "Lần 2" : "Run 2"})` : ""}
                               </span>
                             </div>
 
@@ -773,16 +939,16 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-4 sm:gap-6 text-slate-500 font-semibold">
               <a href="#" className="hover:text-blue-900 transition-colors">
-                Standard Operating Procedures
+                {t.common.sop}
               </a>
               <span className="text-slate-300">|</span>
               <a href="#" className="hover:text-blue-900 transition-colors">
-                Privacy Policy
+                {t.common.privacy}
               </a>
               <span className="text-slate-300">|</span>
               <a href="#" className="hover:text-blue-900 transition-colors flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                System Status
+                {t.common.systemStatus}
               </a>
             </div>
           </footer>
@@ -812,7 +978,6 @@ export default function Home() {
                 alt={zoomedFile.name}
                 className="w-full h-full object-contain"
               />
-              {/* Calibration grid */}
               <div className="absolute inset-0 border border-emerald-500/20 pointer-events-none grid grid-cols-6 grid-rows-6">
                 {Array.from({ length: 36 }).map((_, i) => (
                   <div key={i} className="border-t border-l border-emerald-500/10 font-mono text-[9px] text-emerald-500/40 p-0.5">
@@ -822,8 +987,8 @@ export default function Home() {
               </div>
             </div>
             <div className="p-4 flex items-center justify-between font-mono text-xs text-slate-500 bg-slate-50 rounded-b-xl mt-2">
-              <span>Specimen: <b className="text-slate-800">{zoomedFile.name}</b></span>
-              <span>Ref Calibration: <b className="text-slate-800">75x25mm Grid</b></span>
+              <span>{t.step2.specimenLabel} <b className="text-slate-800">{zoomedFile.name}</b></span>
+              <span>{t.step2.calibrationLabel} <b className="text-slate-800">75x25mm Grid</b></span>
             </div>
           </div>
         </div>

@@ -39,6 +39,7 @@ interface UploadedFile {
 
 export default function Home() {
   const [currentStep, setCurrentStep] = useState<WorkflowStep>("upload");
+  const [errorNotification, setErrorNotification] = useState<string | null>(null);
   const [lang, setLang] = useState<Language>("vi"); // Language state (EN/VI)
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedCardId, setSelectedCardId] = useState<string>(""); // Selected card focused reference
@@ -262,8 +263,23 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(errText || "Analysis server error");
+        let errDetail = "Analysis server error";
+        try {
+          const errJson = await res.json();
+          errDetail = errJson.detail || errJson.message_vi || errDetail;
+        } catch {
+          try {
+            const errText = await res.text();
+            if (errText) errDetail = errText;
+          } catch {}
+        }
+        
+        // If it's a 429 quota error, set global notification alert
+        if (res.status === 429) {
+          setErrorNotification(errDetail);
+        }
+        
+        throw new Error(errDetail);
       }
 
       // Successful analysis structure: { sample_id, measurement_run, confidence }
@@ -487,6 +503,28 @@ export default function Home() {
 
         {/* 4. MAIN CONTENT AREA */}
         <main className="flex-1 bg-slate-50 p-6 md:p-10 flex flex-col justify-between overflow-x-hidden">
+
+          {/* Global Error Notification Alert */}
+          {errorNotification && (
+            <div className="max-w-5xl w-full mx-auto bg-rose-50 border-l-4 border-rose-500 p-4 rounded-r-xl text-rose-900 flex items-start justify-between shadow-sm animate-fadeIn no-print mb-6">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-bold text-rose-950 text-sm">
+                    {lang === "vi" ? "Cảnh báo giới hạn hệ thống" : "System Quota Warning"}
+                  </h4>
+                  <p className="text-xs text-rose-800 mt-0.5">{errorNotification}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setErrorNotification(null)}
+                className="text-rose-400 hover:text-rose-700 transition-colors p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
 
           {/* STEP 1: UPLOAD SAMPLE DATA */}
           {currentStep === "upload" && (

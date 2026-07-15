@@ -2,6 +2,7 @@ import os
 import io
 import logging
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from PIL import Image
@@ -16,6 +17,17 @@ logger = logging.getLogger("backend")
 
 # Suppress thought_signature warnings from google-genai SDK
 logging.getLogger("google_genai").setLevel(logging.ERROR)
+
+# Initialize API key pool
+api_keys = []
+for k, v in os.environ.items():
+    if k.startswith("GEMINI_API_KEY") and v.strip():
+        api_keys.append(v.strip())
+# Sort keys to ensure stable order (e.g. GEMINI_API_KEY, GEMINI_API_KEY_2)
+api_keys.sort()
+if not api_keys:
+    logger.warning("No GEMINI_API_KEY environment variables found!")
+current_key_idx = 0
 
 app = FastAPI(
     title="LabPrint AI pH Analyze Backend",
@@ -116,9 +128,6 @@ async def analyze_image(
         image = Image.open(io.BytesIO(contents))
         logger.info(f"Loaded image successfully: {image.format} - {image.size}")
 
-        # Initialize the Gemini client
-        client = genai.Client()
-        
         # Dynamically switch instructions prompt based on active language parameter
         if lang == "vi":
             prompt_instructions = (
@@ -137,18 +146,46 @@ async def analyze_image(
                 "Return the data structured precisely matching the JSON schema."
             )
 
-        logger.info(f"Calling Gemini API (gemini-3.1-flash) in '{lang}'...")
-        
-        # Call the Gemini model with structured output configuration (using GeminiLabelExtraction)
-        response = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=[image, prompt_instructions],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=GeminiLabelExtraction,
-                temperature=0.1,
-            ),
-        )
+        global current_key_idx
+        attempts = 0
+        max_attempts = len(api_keys) if api_keys else 1
+        response = None
+        error_str = ""
+
+        while attempts < max_attempts:
+            api_key = api_keys[current_key_idx] if api_keys else None
+            try:
+                # Initialize the Gemini client with the current key
+                client = genai.Client(api_key=api_key) if api_key else genai.Client()
+                
+                logger.info(f"Calling Gemini API (gemini-3.5-flash) in '{lang}' using key index {current_key_idx}...")
+                
+                # Call the Gemini model with structured output configuration
+                response = client.models.generate_content(
+                    model="gemini-3.5-flash",
+                    contents=[image, prompt_instructions],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=GeminiLabelExtraction,
+                        temperature=0.1,
+                    ),
+                )
+                break  # Success, exit retry loop
+            
+            except Exception as e:
+                error_str = str(e)
+                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str or "Quota exceeded" in error_str:
+                    logger.warning(f"Quota exceeded for key index {current_key_idx}. Rotating to next key...")
+                    if len(api_keys) > 1:
+                        current_key_idx = (current_key_idx + 1) % len(api_keys)
+                    attempts += 1
+                else:
+                    # Non-429 error, break and raise immediately
+                    raise e
+                    
+        if not response:
+            # If all keys failed with 429, raise the last exception
+            raise Exception(error_str)
 
         parsed_result = response.parsed
         if not parsed_result:
@@ -199,10 +236,42 @@ async def analyze_image(
         )
 
     except Exception as e:
-        if lang == "vi":
-            err_msg = f"Phân tích Gemini API thất bại: {str(e)}"
-        else:
-            err_msg = f"Gemini API analysis failed: {str(e)}"
+        error_str = str(e)
+        logger.error(f"Error occurred during Gemini analysis: {error_str}")
         
-        logger.error(err_msg)
+        # Parse quota/rate limit error (429 RESOURCE_EXHAUSTED)
+        if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str or "Quota exceeded" in error_str:
+            import re
+            
+            # Extract retry delay in seconds
+            retry_match = re.search(r"Please retry in ([\d\.]+)s", error_str)
+            retry_sec = float(retry_match.group(1)) if retry_match else 60.0
+            retry_sec_int = int(round(retry_sec))
+            
+            # Extract quota limit
+            limit_match = re.search(r"limit: (\d+)", error_str)
+            limit_val = int(limit_match.group(1)) if limit_match else 20
+            
+            # Construct friendly localized messages
+            msg_vi = f"Bạn đã vượt quá hạn mức sử dụng miễn phí (tối đa {limit_val} lượt quét/ngày). Vui lòng thử lại sau {retry_sec_int} giây."
+            msg_en = f"You have exceeded the free usage limit (max {limit_val} scans/day). Please try again in {retry_sec_int} seconds."
+            detail_msg = msg_vi if lang == "vi" else msg_en
+            
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error_type": "quota_exceeded",
+                    "limit": limit_val,
+                    "retry_after_seconds": retry_sec,
+                    "message_vi": msg_vi,
+                    "message_en": msg_en,
+                    "detail": detail_msg
+                }
+            )
+
+        if lang == "vi":
+            err_msg = f"Phân tích Gemini API thất bại: {error_str}"
+        else:
+            err_msg = f"Gemini API analysis failed: {error_str}"
+        
         raise HTTPException(status_code=500, detail=err_msg)

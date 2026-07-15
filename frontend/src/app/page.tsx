@@ -301,6 +301,22 @@ export default function Home() {
       );
     } catch (err) {
       console.error(`Gemini OCR failed for file ${file.name}:`, err);
+      
+      // Extract error message for global notification if it's a network or connection error
+      let errorMessage = "Lỗi xử lý ảnh. Vui lòng thử lại.";
+      if (err instanceof TypeError && err.message.includes("Failed to fetch")) {
+        errorMessage = lang === "vi" 
+          ? "Không thể kết nối đến máy chủ. Vui lòng kiểm tra lại đường dẫn API (NEXT_PUBLIC_API_URL)."
+          : "Cannot connect to server. Check API URL.";
+      } else if (err instanceof Error) {
+        // If it's a 429 error, it was already handled and errorNotification was set above.
+        // We only overwrite if errorNotification isn't a 429 detail.
+        errorMessage = err.message;
+      }
+      
+      // Show global alert for the failure
+      setErrorNotification(errorMessage);
+
       setUploadedFiles((prev) =>
         prev.map((f) =>
           f.id === file.id

@@ -109,14 +109,13 @@ async def analyze_image(
         raise HTTPException(status_code=400, detail=err_msg)
 
     # Localized API Key validation error
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    if not api_keys:
         if lang == "vi":
-            err_msg = "Thiếu khóa Gemini API. Vui lòng thiết lập biến GEMINI_API_KEY trong tệp /backend/.env"
+            err_msg = "Thiếu khóa Gemini API. Vui lòng thiết lập biến môi trường GEMINI_API_KEY trên Render."
         else:
-            err_msg = "Gemini API Key is missing. Please set the GEMINI_API_KEY variable in /backend/.env"
+            err_msg = "Missing Gemini API Key. Please set the GEMINI_API_KEY environment variable on Render."
         
-        logger.error(err_msg)
+        logger.warning(err_msg)
         raise HTTPException(status_code=500, detail=err_msg)
 
     try:

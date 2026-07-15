@@ -1,12 +1,18 @@
 import os
 import io
 import logging
+import warnings
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from PIL import Image
 from dotenv import load_dotenv
+
+# Suppress warnings related to Python 3.9 EOL and urllib3 LibreSSL
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.auth")
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.oauth2")
+warnings.filterwarnings("ignore", module="urllib3")
 
 # Load environment variables from .env file
 load_dotenv()
@@ -17,17 +23,6 @@ logger = logging.getLogger("backend")
 
 # Suppress thought_signature warnings from google-genai SDK
 logging.getLogger("google_genai").setLevel(logging.ERROR)
-
-# Initialize API key pool
-api_keys = []
-for k, v in os.environ.items():
-    if k.startswith("GEMINI_API_KEY") and v.strip():
-        api_keys.append(v.strip())
-# Sort keys to ensure stable order (e.g. GEMINI_API_KEY, GEMINI_API_KEY_2)
-api_keys.sort()
-if not api_keys:
-    logger.warning("No GEMINI_API_KEY environment variables found!")
-current_key_idx = 0
 
 app = FastAPI(
     title="LabPrint AI pH Analyze Backend",
@@ -109,7 +104,8 @@ async def analyze_image(
         raise HTTPException(status_code=400, detail=err_msg)
 
     # Localized API Key validation error
-    if not api_keys:
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
         if lang == "vi":
             err_msg = "Thiếu khóa Gemini API. Vui lòng thiết lập biến môi trường GEMINI_API_KEY trên Render."
         else:
@@ -145,46 +141,21 @@ async def analyze_image(
                 "Return the data structured precisely matching the JSON schema."
             )
 
-        global current_key_idx
-        attempts = 0
-        max_attempts = len(api_keys) if api_keys else 1
-        response = None
-        error_str = ""
-
-        while attempts < max_attempts:
-            api_key = api_keys[current_key_idx] if api_keys else None
-            try:
-                # Initialize the Gemini client with the current key
-                client = genai.Client(api_key=api_key) if api_key else genai.Client()
-                
-                logger.info(f"Calling Gemini API (gemini-3.5-flash) in '{lang}' using key index {current_key_idx}...")
-                
-                # Call the Gemini model with structured output configuration
-                response = client.models.generate_content(
-                    model="gemini-3.5-flash",
-                    contents=[image, prompt_instructions],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=GeminiLabelExtraction,
-                        temperature=0.1,
-                    ),
-                )
-                break  # Success, exit retry loop
-            
-            except Exception as e:
-                error_str = str(e)
-                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str or "Quota exceeded" in error_str:
-                    logger.warning(f"Quota exceeded for key index {current_key_idx}. Rotating to next key...")
-                    if len(api_keys) > 1:
-                        current_key_idx = (current_key_idx + 1) % len(api_keys)
-                    attempts += 1
-                else:
-                    # Non-429 error, break and raise immediately
-                    raise e
-                    
-        if not response:
-            # If all keys failed with 429, raise the last exception
-            raise Exception(error_str)
+        # Initialize the Gemini client
+        client = genai.Client()
+        
+        logger.info(f"Calling Gemini API (gemini-3.5-flash) in '{lang}'...")
+        
+        # Call the Gemini model with structured output configuration
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=[image, prompt_instructions],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=GeminiLabelExtraction,
+                temperature=0.1,
+            ),
+        )
 
         parsed_result = response.parsed
         if not parsed_result:

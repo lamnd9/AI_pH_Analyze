@@ -274,8 +274,8 @@ export default function Home() {
           } catch {}
         }
         
-        // If it's a 429 quota error, set global notification alert
-        if (res.status === 429) {
+        // If it's a 429 quota or 503 overload error, set global notification alert
+        if (res.status === 429 || res.status === 503) {
           setErrorNotification(errDetail);
         }
         

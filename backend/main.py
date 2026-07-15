@@ -268,6 +268,22 @@ async def analyze_image(
                 }
             )
 
+        # Parse 503 UNAVAILABLE Server Overload error
+        if "503" in error_str or "UNAVAILABLE" in error_str:
+            msg_vi = "Hệ thống AI của Google hiện đang bị quá tải tạm thời. Vui lòng thử lại sau vài giây."
+            msg_en = "Google AI models are currently experiencing high demand. Please try again in a few seconds."
+            detail_msg = msg_vi if lang == "vi" else msg_en
+            
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error_type": "server_overload",
+                    "message_vi": msg_vi,
+                    "message_en": msg_en,
+                    "detail": detail_msg
+                }
+            )
+
         if lang == "vi":
             err_msg = f"Phân tích Gemini API thất bại: {error_str}"
         else:

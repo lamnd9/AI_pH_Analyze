@@ -44,7 +44,8 @@ class HealthResponse(BaseModel):
     gemini_configured: bool
 
 
-class SampleLabelAnalysis(BaseModel):
+# Schema used strictly by the Gemini API for structured extraction
+class GeminiLabelExtraction(BaseModel):
     sample_id: str = Field(
         description="The sample ID code written in the blue box, e.g., '3878/16'"
     )
@@ -53,6 +54,16 @@ class SampleLabelAnalysis(BaseModel):
     )
     confidence: float = Field(
         description="Confidence score between 0.0 and 1.0 based on how clear the text is"
+    )
+
+
+# Final schema returned by the FastAPI server to the Next.js frontend
+class SampleLabelAnalysis(BaseModel):
+    sample_id: str
+    measurement_run: int
+    confidence: float
+    enhanced_image: str = Field(
+        description="Base64 data URL of the enhanced (brighter, higher contrast) image"
     )
 
 
@@ -133,15 +144,15 @@ async def analyze_image(
                 "Return the data structured precisely matching the JSON schema."
             )
 
-        logger.info(f"Calling Gemini API (gemini-3.5-flash) in '{lang}'...")
+        logger.info(f"Calling Gemini API (gemini-3.1-flash) in '{lang}'...")
         
-        # Call the Gemini model with structured output configuration
+        # Call the Gemini model with structured output configuration (using GeminiLabelExtraction)
         response = client.models.generate_content(
             model="gemini-3.5-flash",
             contents=[image, prompt_instructions],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=SampleLabelAnalysis,
+                response_schema=GeminiLabelExtraction,
                 temperature=0.1,
             ),
         )
@@ -155,8 +166,37 @@ async def analyze_image(
             logger.error(err_msg)
             raise HTTPException(status_code=500, detail=err_msg)
 
-        logger.info(f"Successfully analyzed label. Result: {parsed_result}")
-        return parsed_result
+        logger.info(f"Successfully extracted metadata from Gemini: {parsed_result}")
+
+        # Image enhancement: make it brighter and enhance readability
+        from PIL import ImageEnhance
+        import base64
+
+        # 1. Enhance brightness by 35%
+        brightness_enhancer = ImageEnhance.Brightness(image)
+        enhanced_image = brightness_enhancer.enhance(1.35)
+
+        # 2. Enhance contrast by 25% (makes text/numbers on display stand out)
+        contrast_enhancer = ImageEnhance.Contrast(enhanced_image)
+        enhanced_image = contrast_enhancer.enhance(1.25)
+
+        # 3. Enhance sharpness by 50% (makes text edges clearer)
+        sharpness_enhancer = ImageEnhance.Sharpness(enhanced_image)
+        enhanced_image = sharpness_enhancer.enhance(1.5)
+
+        # Encode processed image to base64
+        buffered = io.BytesIO()
+        enhanced_image.save(buffered, format="JPEG", quality=90)
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        enhanced_base64 = f"data:image/jpeg;base64,{img_str}"
+
+        # Return final combined object to Next.js
+        return SampleLabelAnalysis(
+            sample_id=parsed_result.sample_id,
+            measurement_run=parsed_result.measurement_run,
+            confidence=parsed_result.confidence,
+            enhanced_image=enhanced_base64
+        )
 
     except Exception as e:
         if lang == "vi":

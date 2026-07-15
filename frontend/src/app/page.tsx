@@ -276,6 +276,7 @@ export default function Home() {
                 sampleId: data.sample_id,
                 run: data.measurement_run === 2 ? "Run 2" : "Run 1",
                 confidence: Math.round(data.confidence * 100),
+                previewUrl: data.enhanced_image, // Replace original with enhanced base64 image!
                 status: "Recognized",
               }
             : f

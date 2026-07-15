@@ -254,8 +254,9 @@ export default function Home() {
       const formData = new FormData();
       formData.append("file", fileToUpload);
 
-      // Call API (Proxied automatically with lang parameter appended)
-      const res = await fetch(`/api/analyze-image?lang=${lang}`, {
+      // Call API (uses NEXT_PUBLIC_API_URL if configured, otherwise falls back to local proxy /api)
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
+      const res = await fetch(`${apiUrl}/api/analyze-image?lang=${lang}`, {
         method: "POST",
         body: formData,
       });

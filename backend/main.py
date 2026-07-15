@@ -23,16 +23,9 @@ app = FastAPI(
     version="0.3.0",
 )
 
-# CORS middleware configuration
-origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -168,25 +161,32 @@ async def analyze_image(
 
         logger.info(f"Successfully extracted metadata from Gemini: {parsed_result}")
 
-        # Image enhancement: make it brighter and enhance readability
+        # Image enhancement: Ink-Saver mode + text contrast boost
         from PIL import ImageEnhance
         import base64
 
-        # 1. Enhance brightness by 35%
-        brightness_enhancer = ImageEnhance.Brightness(image)
-        enhanced_image = brightness_enhancer.enhance(1.35)
+        # Convert to Grayscale (L) first to match Saturation = 0 and save all color ink
+        image = image.convert("L")
 
-        # 2. Enhance contrast by 25% (makes text/numbers on display stand out)
-        contrast_enhancer = ImageEnhance.Contrast(enhanced_image)
-        enhanced_image = contrast_enhancer.enhance(1.25)
+        # 1. Apply custom transfer curve (Levels adjustment):
+        # Deepen dark values (p < 45) to p * 0.7 to keep text/digits solid black.
+        # Shift and stretch mid-to-bright values aggressively to push them to pure white (255).
+        image = image.point(lambda p: int(p * 0.7) if p < 45 else min(255, int((p - 45) * 1.7 + 30)))
 
-        # 3. Enhance sharpness by 50% (makes text edges clearer)
-        sharpness_enhancer = ImageEnhance.Sharpness(enhanced_image)
-        enhanced_image = sharpness_enhancer.enhance(1.5)
+        # Convert back to RGB mode for compatibility with standard browsers and canvas overlays
+        image = image.convert("RGB")
+
+        # 2. Boost contrast by 40% to make the text and screen digits stand out sharp against the whited-out background
+        contrast_enhancer = ImageEnhance.Contrast(image)
+        image = contrast_enhancer.enhance(1.4)
+
+        # 3. Enhance sharpness by 50% to make the handwriting edges crisp
+        sharpness_enhancer = ImageEnhance.Sharpness(image)
+        image = sharpness_enhancer.enhance(1.5)
 
         # Encode processed image to base64
         buffered = io.BytesIO()
-        enhanced_image.save(buffered, format="JPEG", quality=90)
+        image.save(buffered, format="JPEG", quality=90)
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
         enhanced_base64 = f"data:image/jpeg;base64,{img_str}"
 

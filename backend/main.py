@@ -157,11 +157,11 @@ async def analyze_image(
                 # Initialize the Gemini client with the current key
                 client = genai.Client(api_key=api_key) if api_key else genai.Client()
                 
-                logger.info(f"Calling Gemini API (gemini-3.5-flash) in '{lang}' using key index {current_key_idx}...")
+                logger.info(f"Calling Gemini API (gemini-2.5-flash) in '{lang}' using key index {current_key_idx}...")
                 
                 # Call the Gemini model with structured output configuration
                 response = client.models.generate_content(
-                    model="gemini-3.5-flash",
+                    model="gemini-2.5-flash",
                     contents=[image, prompt_instructions],
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",

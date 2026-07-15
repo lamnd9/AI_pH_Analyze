@@ -74,7 +74,7 @@ export default function Home() {
     Object.keys(groupedSamples).forEach((key) => {
       const files = groupedSamples[key];
       const sampleIdLabel = files[0].sampleId; // Display name
-      
+
       const missingRunLabel = files[0].run === "Run 1" ? t.step2.run2 : t.step2.run1;
 
       if (files.length === 1) {
@@ -153,7 +153,7 @@ export default function Home() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    
+
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       processFiles(e.dataTransfer.files);
     }
@@ -167,13 +167,13 @@ export default function Home() {
 
   const processFiles = (fileList: FileList) => {
     const newFiles: UploadedFile[] = [];
-    
+
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
       const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
       const previewUrl = URL.createObjectURL(file);
       const generatedNumber = 3881 + uploadedFiles.length + i;
-      
+
       newFiles.push({
         id: `file-${Date.now()}-${i}`,
         name: file.name,
@@ -267,18 +267,18 @@ export default function Home() {
 
       // Successful analysis structure: { sample_id, measurement_run, confidence }
       const data = await res.json();
-      
+
       setUploadedFiles((prev) =>
         prev.map((f) =>
           f.id === file.id
             ? {
-                ...f,
-                sampleId: data.sample_id,
-                run: data.measurement_run === 2 ? "Run 2" : "Run 1",
-                confidence: Math.round(data.confidence * 100),
-                previewUrl: data.enhanced_image, // Replace original with enhanced base64 image!
-                status: "Recognized",
-              }
+              ...f,
+              sampleId: data.sample_id,
+              run: data.measurement_run === 2 ? "Run 2" : "Run 1",
+              confidence: Math.round(data.confidence * 100),
+              previewUrl: data.enhanced_image, // Replace original with enhanced base64 image!
+              status: "Recognized",
+            }
             : f
         )
       );
@@ -288,9 +288,9 @@ export default function Home() {
         prev.map((f) =>
           f.id === file.id
             ? {
-                ...f,
-                status: "Error",
-              }
+              ...f,
+              status: "Error",
+            }
             : f
         )
       );
@@ -309,9 +309,10 @@ export default function Home() {
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
-      
+
       {/* Print CSS optimization style tag */}
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style dangerouslySetInnerHTML={{
+        __html: `
         @media print {
           body, html {
             background: #ffffff !important;
@@ -365,58 +366,36 @@ export default function Home() {
             <Microscope className="w-5 h-5 stroke-[2.2]" />
           </div>
           <span className="text-xl font-extrabold tracking-tight text-blue-900">
-            LabPrint
-          </span>
-          <span className="hidden sm:inline-block px-2 py-0.5 text-xs font-semibold rounded bg-slate-100 text-slate-500 uppercase tracking-wider">
-            Clinical Suite
+            PHÒNG KIỂM NGHIỆM MỸ PHẨM
           </span>
         </div>
 
         {/* Top Right Layout Options */}
         <div className="flex items-center gap-3">
-          
+
           {/* Language Switcher EN/VI */}
           <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
             <button
               onClick={() => setLang("en")}
-              className={`px-2 py-1 rounded text-[10px] font-extrabold transition-all duration-200 ${
-                lang === "en" ? "bg-white text-blue-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
-              }`}
+              className={`px-2 py-1 rounded text-[10px] font-extrabold transition-all duration-200 ${lang === "en" ? "bg-white text-blue-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
+                }`}
             >
               EN
             </button>
             <button
               onClick={() => setLang("vi")}
-              className={`px-2 py-1 rounded text-[10px] font-extrabold transition-all duration-200 ${
-                lang === "vi" ? "bg-white text-blue-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
-              }`}
+              className={`px-2 py-1 rounded text-[10px] font-extrabold transition-all duration-200 ${lang === "vi" ? "bg-white text-blue-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
+                }`}
             >
               VI
             </button>
           </div>
-
-          <div className="h-6 w-px bg-slate-200"></div>
-
-          {/* User profile avatar */}
-          <div className="flex items-center gap-3">
-            <div className="flex flex-col items-end hidden md:block">
-              <span className="text-xs font-bold text-slate-800">{t.common.avatarLabel}</span>
-              <span className="text-[10px] text-slate-500 font-mono">ID: CLIN-7890</span>
-            </div>
-            <div className="relative group cursor-pointer">
-              <div className="w-10 h-10 overflow-hidden rounded-full ring-2 ring-blue-100 transition-all duration-300 group-hover:ring-blue-300 bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold">
-                DL
-              </div>
-              <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full"></span>
-            </div>
-          </div>
-
         </div>
       </header>
 
       {/* BODY MAIN CONTAINER */}
       <div className="flex flex-1">
-        
+
         {/* 2. SIDEBAR (Workflow Steps) */}
         <aside className="w-64 shrink-0 bg-white border-r border-slate-200 p-6 flex flex-col justify-between hidden md:flex no-print">
           <div className="space-y-6">
@@ -428,11 +407,10 @@ export default function Home() {
                 {/* Step 1: Upload & Preview */}
                 <button
                   onClick={() => setCurrentStep("upload")}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 ${
-                    currentStep === "upload"
-                      ? "bg-blue-50 text-blue-900"
-                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
-                  }`}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 ${currentStep === "upload"
+                    ? "bg-blue-50 text-blue-900"
+                    : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                    }`}
                 >
                   <UploadCloud className={`w-4 h-4 ${currentStep === "upload" ? "text-blue-900" : "text-slate-400"}`} />
                   <span>{t.sidebar.upload}</span>
@@ -441,11 +419,10 @@ export default function Home() {
                 {/* Step 2: Review & Edit */}
                 <button
                   onClick={() => setCurrentStep("review")}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 ${
-                    currentStep === "review"
-                      ? "bg-blue-50 text-blue-900"
-                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
-                  }`}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 ${currentStep === "review"
+                    ? "bg-blue-50 text-blue-900"
+                    : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                    }`}
                 >
                   <Table className={`w-4 h-4 ${currentStep === "review" ? "text-blue-900" : "text-slate-400"}`} />
                   <span>{t.sidebar.review}</span>
@@ -454,18 +431,17 @@ export default function Home() {
                 {/* Step 3: Grouping & Print */}
                 <button
                   onClick={() => setCurrentStep("print")}
-                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 ${
-                    currentStep === "print"
-                      ? "bg-blue-50 text-blue-900"
-                      : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
-                  }`}
+                  className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200 ${currentStep === "print"
+                    ? "bg-blue-50 text-blue-900"
+                    : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
+                    }`}
                 >
                   <Printer className={`w-4 h-4 ${currentStep === "print" ? "text-blue-900" : "text-slate-400"}`} />
                   <span>{t.sidebar.print}</span>
                 </button>
               </nav>
             </div>
-            
+
             {/* Quick stats panel */}
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-100">
               <div className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
@@ -492,7 +468,7 @@ export default function Home() {
 
         {/* 4. MAIN CONTENT AREA */}
         <main className="flex-1 bg-slate-50 p-6 md:p-10 flex flex-col justify-between overflow-x-hidden">
-          
+
           {/* STEP 1: UPLOAD SAMPLE DATA */}
           {currentStep === "upload" && (
             <div className="max-w-5xl w-full mx-auto space-y-8 animate-fadeIn no-print">
@@ -510,11 +486,10 @@ export default function Home() {
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
-                className={`group flex flex-col items-center justify-center min-h-[220px] p-8 border-2 border-dashed rounded-2xl cursor-pointer transition-all duration-300 bg-white shadow-sm hover:shadow-md ${
-                  isDragOver
-                    ? "border-blue-500 bg-blue-50/50 scale-[0.99]"
-                    : "border-slate-300 hover:border-blue-400"
-                }`}
+                className={`group flex flex-col items-center justify-center min-h-[220px] p-8 border-2 border-dashed rounded-2xl cursor-pointer transition-all duration-300 bg-white shadow-sm hover:shadow-md ${isDragOver
+                  ? "border-blue-500 bg-blue-50/50 scale-[0.99]"
+                  : "border-slate-300 hover:border-blue-400"
+                  }`}
               >
                 <input
                   type="file"
@@ -524,11 +499,11 @@ export default function Home() {
                   className="hidden"
                   accept="image/*"
                 />
-                
+
                 <div className="p-4 rounded-full bg-blue-50 text-blue-600 transition-all duration-300 group-hover:scale-110 mb-4">
                   <UploadCloud className="w-8 h-8 stroke-[1.8]" />
                 </div>
-                
+
                 <p className="text-sm font-semibold text-slate-700">
                   {t.step1.clickUpload}
                 </p>
@@ -543,7 +518,7 @@ export default function Home() {
                   <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
                     {t.step1.recentUploads}
                   </h3>
-                  
+
                   {uploadedFiles.length > 0 && (
                     <button
                       onClick={handleStartRecognition}
@@ -623,11 +598,10 @@ export default function Home() {
                     <div
                       key={file.id}
                       onClick={() => setSelectedCardId(file.id)}
-                      className={`group relative flex flex-col bg-white border rounded-xl overflow-hidden shadow-sm transition-all duration-300 hover:shadow-md cursor-pointer ${
-                        isFocused
-                          ? "border-l-4 border-l-blue-900 border-slate-300 scale-[1.01]"
-                          : "border-slate-200"
-                      }`}
+                      className={`group relative flex flex-col bg-white border rounded-xl overflow-hidden shadow-sm transition-all duration-300 hover:shadow-md cursor-pointer ${isFocused
+                        ? "border-l-4 border-l-blue-900 border-slate-300 scale-[1.01]"
+                        : "border-slate-200"
+                        }`}
                     >
                       {/* Top Image Container */}
                       <div className="relative aspect-video w-full overflow-hidden bg-slate-100 border-b border-slate-100">
@@ -637,9 +611,8 @@ export default function Home() {
                           alt={file.name}
                           className="w-full h-full object-cover"
                         />
-                        <div className={`absolute inset-0 bg-slate-950/20 flex items-center justify-center transition-opacity duration-205 ${
-                          file.id !== "mock-1" ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-                        }`}>
+                        <div className={`absolute inset-0 bg-slate-950/20 flex items-center justify-center transition-opacity duration-205 ${file.id !== "mock-1" ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                          }`}>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -654,7 +627,7 @@ export default function Home() {
 
                       {/* Content Panel */}
                       <div className="relative p-5 space-y-4 min-h-[220px]">
-                        
+
                         {/* Scanning Loader Overlay */}
                         {file.status === "Scanning" && (
                           <div className="absolute inset-0 z-10 bg-white/80 backdrop-blur-[1px] flex flex-col items-center justify-center space-y-2 rounded-b-xl">
@@ -725,11 +698,10 @@ export default function Home() {
                                 e.stopPropagation();
                                 handleRunToggle(file.id, "Run 1");
                               }}
-                              className={`flex-1 py-1 rounded-md text-xs transition-all duration-200 ${
-                                file.run === "Run 1"
-                                  ? "bg-white shadow-sm font-bold text-slate-900"
-                                  : "text-slate-500 hover:text-slate-900"
-                              } disabled:opacity-50`}
+                              className={`flex-1 py-1 rounded-md text-xs transition-all duration-200 ${file.run === "Run 1"
+                                ? "bg-white shadow-sm font-bold text-slate-900"
+                                : "text-slate-500 hover:text-slate-900"
+                                } disabled:opacity-50`}
                             >
                               {t.step2.run1}
                             </button>
@@ -740,11 +712,10 @@ export default function Home() {
                                 e.stopPropagation();
                                 handleRunToggle(file.id, "Run 2");
                               }}
-                              className={`flex-1 py-1 rounded-md text-xs transition-all duration-200 ${
-                                file.run === "Run 2"
-                                  ? "bg-white shadow-sm font-bold text-slate-900"
-                                  : "text-slate-500 hover:text-slate-900"
-                              } disabled:opacity-50`}
+                              className={`flex-1 py-1 rounded-md text-xs transition-all duration-200 ${file.run === "Run 2"
+                                ? "bg-white shadow-sm font-bold text-slate-900"
+                                : "text-slate-500 hover:text-slate-900"
+                                } disabled:opacity-50`}
                             >
                               {t.step2.run2}
                             </button>
@@ -774,7 +745,7 @@ export default function Home() {
           {/* STEP 3: FINAL REVIEW & GROUPING */}
           {currentStep === "print" && (
             <div className="max-w-5xl w-full mx-auto space-y-8 animate-fadeIn">
-              
+
               {/* Header Title Block */}
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-200 pb-5 no-print">
                 <div>
@@ -822,7 +793,7 @@ export default function Home() {
                 {Object.keys(groupedSamples).map((sampleKey, groupIdx) => {
                   const groupFiles = groupedSamples[sampleKey];
                   const sampleDisplayId = groupFiles[0].sampleId;
-                  
+
                   const run1Specimen = groupFiles.find(f => f.run === "Run 1");
                   const run2Specimen = groupFiles.find(f => f.run === "Run 2");
 
@@ -834,12 +805,12 @@ export default function Home() {
                       </div>
 
                       {/* Zooming scaling container wrapper for mobile responsiveness, preserving A4 aspect ratio */}
-                      <div 
+                      <div
                         className="print-wrapper w-full flex justify-center"
                         style={scale < 1 ? { height: `${1123 * scale}px` } : {}}
                       >
                         {/* PORTRAIT A4 SIMULATED PAGE CONTAINER */}
-                        <div 
+                        <div
                           className="print-page w-[210mm] min-h-[297mm] bg-white border border-slate-200 shadow-xl rounded-lg p-[18mm] flex flex-col justify-between transition-all duration-300 shrink-0"
                           style={{
                             transform: scale < 1 ? `scale(${scale})` : "none",
@@ -847,26 +818,32 @@ export default function Home() {
                           }}
                         >
                           <div>
-                            
+
                             {/* Report Header block */}
                             <div className="flex items-start justify-between border-b border-slate-300 pb-4 mb-6">
-                              <div>
-                                <h2 className="text-xl font-black text-blue-900 tracking-tight leading-none uppercase">
+                              <div className="space-y-2">
+                                <div className="text-xl font-black text-blue-900 tracking-tight leading-none uppercase">
                                   {t.step3.a4Title}
-                                </h2>
-                                <span className="text-[9px] font-bold text-slate-400 tracking-widest uppercase block mt-1">
+                                </div>
+                                <div className="text-[18px] font-semibold text-blue-900 leading-none tracking-wider">
                                   {t.step3.a4Sub}
-                                </span>
+                                </div>
                               </div>
-                              <div className="text-right font-mono text-xs text-slate-600 space-y-0.5">
-                                <div>Date: <span className="font-semibold text-slate-800">{currentDate}</span></div>
-                                <div>Sample ID: <span className="font-bold text-blue-900">{sampleDisplayId}</span></div>
+                              <div className="text-right font-times text-xl font-black text-blue-900 space-y-2">
+                                <div className="leading-none">
+                                  {t.step3.dateLabel}
+                                  <span className="text-[18px] font-semibold leading-none">{currentDate}</span>
+                                </div>
+                                <div className="leading-none">
+                                  {t.step3.sampleLabel}
+                                  <span className="text-[18px] font-semibold leading-none">{sampleDisplayId}</span>
+                                </div>
                               </div>
                             </div>
 
                             {/* Two-Column Image Grid */}
                             <div className="grid grid-cols-2 gap-6">
-                              
+
                               {/* Run 1 Col */}
                               <div className="space-y-3">
                                 <div className="aspect-[4/3] w-full rounded border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center">

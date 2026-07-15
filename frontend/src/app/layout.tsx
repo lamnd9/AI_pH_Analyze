@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "LabPrint - System Ready",
-  description: "LabPrint AI pH Analysis System",
+  title: "PHÒNG KIỂM NGHIỆM MỸ PHẨM",
+  description: "Ứng dụng AI trong kiểm nghiệm mỹ phẩm",
 };
 
 export default function RootLayout({
@@ -12,7 +12,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="vi">
       <body className="antialiased">
         {children}
       </body>

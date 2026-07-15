@@ -297,10 +297,10 @@ export default function Home() {
     }
   };
 
-  // Format current date for Clinical Report Page
-  const currentDate = useMemo(() => {
+  // Date state for Clinical Report Page (defaults to current local date)
+  const [currentDate, setCurrentDate] = useState<string>(() => {
     return new Date().toISOString().split("T")[0];
-  }, []);
+  });
 
   // Print execution handler
   const handlePrint = () => {
@@ -313,12 +313,18 @@ export default function Home() {
       {/* Print CSS optimization style tag */}
       <style dangerouslySetInnerHTML={{
         __html: `
+        @page {
+          size: A4 portrait;
+          margin: 0 !important;
+        }
         @media print {
           body, html {
             background: #ffffff !important;
             color: #000000 !important;
             margin: 0 !important;
             padding: 0 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           header, aside, footer, .no-print {
             display: none !important;
@@ -336,11 +342,19 @@ export default function Home() {
             box-shadow: none !important;
             border: none !important;
           }
+          /* Reset tailwind's vertical spacing margins that push pages down and cause extra blank pages */
+          .print-area > * {
+            margin-top: 0 !important;
+            margin-bottom: 0 !important;
+          }
           .print-wrapper {
             height: auto !important;
             width: auto !important;
             display: block !important;
             transform: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
           }
           .print-page {
             width: 210mm !important;
@@ -351,10 +365,14 @@ export default function Home() {
             border: none !important;
             background: white !important;
             page-break-after: always !important;
+            page-break-inside: avoid !important;
             display: flex !important;
             flex-direction: column !important;
             transform: none !important;
             transform-origin: initial !important;
+          }
+          .print-area > div:last-child .print-page {
+            page-break-after: avoid !important;
           }
         }
       `}} />
@@ -756,7 +774,18 @@ export default function Home() {
                     {t.step3.subtitle}
                   </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                  {/* Interactive Date Picker Selector (no-print) */}
+                  <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3.5 py-2 shadow-sm text-xs font-semibold text-slate-700">
+                    <span>{lang === "vi" ? "Ngày in báo cáo:" : "Report Date:"}</span>
+                    <input
+                      type="date"
+                      value={currentDate}
+                      onChange={(e) => setCurrentDate(e.target.value)}
+                      className="bg-transparent border-none focus:outline-none focus:ring-0 text-blue-900 font-extrabold font-mono cursor-pointer"
+                    />
+                  </div>
+
                   <button
                     onClick={() => setCurrentStep("review")}
                     className="px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl transition-all shadow-sm active:scale-95"
@@ -892,11 +921,6 @@ export default function Home() {
 
                           </div>
 
-                          {/* A4 Report Footer details */}
-                          <div className="border-t border-slate-200 pt-3 flex items-center justify-between text-[9px] font-mono text-slate-400">
-                            <span>SYSTEM INTEGRITY: VERIFIED</span>
-                            <span>LABPRINT CLINICAL OUTPUT SUITE</span>
-                          </div>
                         </div>
                       </div>
                     </div>

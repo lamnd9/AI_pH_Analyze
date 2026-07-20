@@ -176,9 +176,9 @@ async def analyze_image(
         image = image.convert("L")
 
         # 1. Apply custom transfer curve (Levels adjustment):
-        # Deepen dark values (p < 45) to p * 0.7 to keep text/digits solid black.
-        # Shift and stretch mid-to-bright values aggressively to push them to pure white (255).
-        image = image.point(lambda p: int(p * 0.7) if p < 45 else min(255, int((p - 45) * 1.7 + 30)))
+        # Deepen dark values (p < 50) to keep text/digits solid black.
+        # Shift and stretch mid-to-bright values aggressively to push them to pure white (255) to brighten LCD screens.
+        image = image.point(lambda p: int(p * 0.5) if p < 50 else min(255, int((p - 50) * 2.1 + 110)))
 
         # Convert back to RGB mode for compatibility with standard browsers and canvas overlays
         image = image.convert("RGB")

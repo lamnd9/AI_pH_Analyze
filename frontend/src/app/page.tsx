@@ -372,8 +372,8 @@ export default function Home() {
     const imageAspectRatio = imgRatio;
     const newHeight = newWidth * (imageAspectRatio / targetRatio);
     
-    // Avoid out of bounds height
-    if (newHeight > 100) return;
+    // Avoid excessively large sizes
+    if (newWidth > 200 || newHeight > 200) return;
 
     setCrop((prev) => {
       const centerX = prev.x + prev.width / 2;
@@ -382,8 +382,8 @@ export default function Home() {
       let newX = centerX - newWidth / 2;
       let newY = centerY - newHeight / 2;
       
-      newX = Math.max(0, Math.min(100 - newWidth, newX));
-      newY = Math.max(0, Math.min(100 - newHeight, newY));
+      newX = Math.max(-newWidth * 0.8, Math.min(100 - newWidth * 0.2, newX));
+      newY = Math.max(-newHeight * 0.8, Math.min(100 - newHeight * 0.2, newY));
       
       return {
         x: newX,
@@ -410,8 +410,8 @@ export default function Home() {
       let newX = prev.x + deltaX;
       let newY = prev.y + deltaY;
       
-      newX = Math.max(0, Math.min(100 - prev.width, newX));
-      newY = Math.max(0, Math.min(100 - prev.height, newY));
+      newX = Math.max(-prev.width * 0.8, Math.min(100 - prev.width * 0.2, newX));
+      newY = Math.max(-prev.height * 0.8, Math.min(100 - prev.height * 0.2, newY));
       
       return { ...prev, x: newX, y: newY };
     });
@@ -432,9 +432,6 @@ export default function Home() {
 
     img.onload = () => {
       const canvas = document.createElement("canvas");
-      
-      const sourceX = (crop.x / 100) * img.naturalWidth;
-      const sourceY = (crop.y / 100) * img.naturalHeight;
       const sourceWidth = (crop.width / 100) * img.naturalWidth;
       const sourceHeight = (crop.height / 100) * img.naturalHeight;
       
@@ -443,16 +440,26 @@ export default function Home() {
       
       const ctx = canvas.getContext("2d");
       if (ctx) {
+        // Fill canvas with white background (handles out of bounds regions)
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Calculate destination mapping coordinates
+        const destX = -(crop.x / 100) * img.naturalWidth;
+        const destY = -(crop.y / 100) * img.naturalHeight;
+        const destWidth = img.naturalWidth;
+        const destHeight = img.naturalHeight;
+        
         ctx.drawImage(
           img,
-          sourceX,
-          sourceY,
-          sourceWidth,
-          sourceHeight,
           0,
           0,
-          sourceWidth,
-          sourceHeight
+          img.naturalWidth,
+          img.naturalHeight,
+          destX,
+          destY,
+          destWidth,
+          destHeight
         );
         
         canvas.toBlob((blob) => {
@@ -469,22 +476,13 @@ export default function Home() {
                       ...f,
                       previewUrl: croppedPreviewUrl,
                       file: croppedFile,
-                      status: "Scanning" as const,
+                      status: "Recognized",
                       confidence: 0,
                     }
                   : f
               )
             );
             
-            const updatedFileObject = {
-              ...croppingFile,
-              previewUrl: croppedPreviewUrl,
-              file: croppedFile,
-              status: "Scanning" as const,
-              confidence: 0,
-            };
-            
-            analyzeFile(updatedFileObject);
             setCroppingFile(null);
           }
         }, "image/jpeg", 0.95);
@@ -787,13 +785,29 @@ export default function Home() {
                           <X className="w-3.5 h-3.5" />
                         </button>
 
-                        <div className="relative aspect-video w-full overflow-hidden bg-slate-100 border-b border-slate-100">
+                        <div className="relative aspect-video w-full overflow-hidden bg-slate-950 border-b border-slate-100">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={file.previewUrl}
                             alt={file.name}
-                            className="w-full h-full object-cover"
+                            className="w-full h-full object-contain"
                           />
+                          
+                          {/* Hover action overlay with Crop button */}
+                          {file.originalFile && (
+                            <div className="absolute inset-0 bg-slate-950/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCroppingFile(file);
+                                }}
+                                className="w-10 h-10 bg-white hover:bg-slate-50 text-blue-900 rounded-lg flex items-center justify-center shadow-md active:scale-90 transition-transform"
+                                title={lang === "vi" ? "Cắt xén hình ảnh" : "Crop Image"}
+                              >
+                                <Crop className="w-5 h-5 stroke-[2.2]" />
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                         <div className="p-3.5">
@@ -838,13 +852,12 @@ export default function Home() {
                         : "border-slate-200"
                         }`}
                     >
-                      {/* Top Image Container */}
-                      <div className="relative aspect-video w-full overflow-hidden bg-slate-100 border-b border-slate-100">
+                      <div className="relative aspect-video w-full overflow-hidden bg-slate-950 border-b border-slate-100">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={file.previewUrl}
                           alt={file.name}
-                          className="w-full h-full object-cover"
+                          className="w-full h-full object-contain"
                         />
                         <div className={`absolute inset-0 bg-slate-950/20 flex items-center justify-center gap-3 transition-opacity duration-205 ${file.id !== "mock-1" ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                           }`}>
@@ -858,20 +871,6 @@ export default function Home() {
                           >
                             <Search className="w-5 h-5 stroke-[2.2]" />
                           </button>
-                          
-                          {/* Only allow cropping if the file was uploaded (has originalFile) */}
-                          {file.originalFile && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setCroppingFile(file);
-                              }}
-                              className="w-10 h-10 bg-white hover:bg-slate-50 text-blue-900 rounded-lg flex items-center justify-center shadow-md active:scale-90 transition-transform"
-                              title={lang === "vi" ? "Cắt xén hình ảnh" : "Crop Image"}
-                            >
-                              <Crop className="w-5 h-5 stroke-[2.2]" />
-                            </button>
-                          )}
                         </div>
                       </div>
 
@@ -1113,7 +1112,7 @@ export default function Home() {
                                     <img
                                       src={run1Specimen.previewUrl}
                                       alt={`${sampleDisplayId} Run 1`}
-                                      className="w-full h-full object-cover filter grayscale"
+                                      className="w-full h-full object-contain bg-white filter grayscale"
                                     />
                                   ) : (
                                     <div className="flex flex-col items-center justify-center p-4 text-center text-slate-300 font-mono text-[10px]">
@@ -1135,7 +1134,7 @@ export default function Home() {
                                     <img
                                       src={run2Specimen.previewUrl}
                                       alt={`${sampleDisplayId} Run 2`}
-                                      className="w-full h-full object-cover filter grayscale"
+                                      className="w-full h-full object-contain bg-white filter grayscale"
                                     />
                                   ) : (
                                     <div className="flex flex-col items-center justify-center p-4 text-center text-slate-300 font-mono text-[10px]">
@@ -1319,7 +1318,7 @@ export default function Home() {
                 <input
                   type="range"
                   min="20"
-                  max="100"
+                  max="200"
                   value={crop.width}
                   onChange={(e) => handleCropSizeChange(parseFloat(e.target.value))}
                   className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-900"
@@ -1341,7 +1340,7 @@ export default function Home() {
                     onClick={saveCrop}
                     className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-white bg-blue-900 hover:bg-blue-800 rounded-xl transition-colors shadow-sm active:scale-95"
                   >
-                    {lang === "vi" ? "Lưu & Quét lại" : "Save & Re-scan"}
+                    {lang === "vi" ? "Lưu" : "Save"}
                   </button>
                 </div>
               </div>

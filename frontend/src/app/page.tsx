@@ -37,10 +37,15 @@ interface UploadedFile {
   status: "Recognized" | "Edited" | "Scanning" | "Error";
   file?: File;            // Keep original File reference for API uploading
   originalFile?: File;    // Store the original unmodified upload for cropping
+  lastCrop?: { x: number; y: number; width: number; height: number }; // Last applied crop settings
 }
 
 // Utility function to auto-crop an image to a centered 4:3 aspect ratio on upload
-const autoCropImage = (file: File): Promise<{ croppedFile: File; previewUrl: string }> => {
+const autoCropImage = (file: File): Promise<{
+  croppedFile: File;
+  previewUrl: string;
+  initialCrop: { x: number; y: number; width: number; height: number };
+}> => {
   return new Promise((resolve) => {
     const img = new Image();
     const originalUrl = URL.createObjectURL(file);
@@ -69,6 +74,12 @@ const autoCropImage = (file: File): Promise<{ croppedFile: File; previewUrl: str
         sourceY = (img.naturalHeight - sourceHeight) / 2;
       }
       
+      const cropX = (sourceX / img.naturalWidth) * 100;
+      const cropY = (sourceY / img.naturalHeight) * 100;
+      const cropW = (sourceWidth / img.naturalWidth) * 100;
+      const cropH = (sourceHeight / img.naturalHeight) * 100;
+      const initialCrop = { x: cropX, y: cropY, width: cropW, height: cropH };
+      
       canvas.width = sourceWidth;
       canvas.height = sourceHeight;
       
@@ -96,15 +107,20 @@ const autoCropImage = (file: File): Promise<{ croppedFile: File; previewUrl: str
         if (blob) {
           const croppedFile = new File([blob], file.name, { type: "image/jpeg" });
           const previewUrl = URL.createObjectURL(blob);
-          resolve({ croppedFile, previewUrl });
+          resolve({ croppedFile, previewUrl, initialCrop });
         } else {
-          resolve({ croppedFile: file, previewUrl: originalUrl });
+          resolve({ croppedFile: file, previewUrl: originalUrl, initialCrop });
         }
       }, "image/jpeg", 0.95);
     };
     
     img.onerror = () => {
-      resolve({ croppedFile: file, previewUrl: originalUrl });
+      const targetRatio = 4 / 3;
+      resolve({
+        croppedFile: file,
+        previewUrl: originalUrl,
+        initialCrop: { x: 10, y: 10, width: 80, height: 60 }
+      });
     };
   });
 };
@@ -130,6 +146,13 @@ export default function Home() {
 
   // Initial file list (starts empty for production use)
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+
+  // Listen to croppingFile changes to initialize crop box to its last saved coordinates
+  React.useEffect(() => {
+    if (croppingFile && croppingFile.lastCrop) {
+      setCrop(croppingFile.lastCrop);
+    }
+  }, [croppingFile]);
 
   // Auto-grouping algorithm: aggregate images by Sample ID (trimmed, case-insensitive)
   const groupedSamples = useMemo(() => {
@@ -252,7 +275,7 @@ export default function Home() {
       const generatedNumber = 3881 + uploadedFiles.length + i;
       
       // Auto crop image to 4:3 on upload
-      const { croppedFile, previewUrl } = await autoCropImage(file);
+      const { croppedFile, previewUrl, initialCrop } = await autoCropImage(file);
 
       newFiles.push({
         id: `file-${Date.now()}-${i}`,
@@ -266,6 +289,7 @@ export default function Home() {
         status: "Recognized",
         file: croppedFile, // Store the auto-cropped file for API uploading
         originalFile: file, // Keep the original file reference for cropping reset
+        lastCrop: initialCrop, // Save initial crop coordinates
       });
     }
 
@@ -426,18 +450,23 @@ export default function Home() {
     const img = e.currentTarget;
     setImgDims({ w: img.naturalWidth, h: img.naturalHeight });
     
-    // Calculate initial 4:3 crop box centered on image
-    const imageAspectRatio = img.naturalWidth / img.naturalHeight;
-    const maxW = Math.min(80, 80 * (targetRatio / imageAspectRatio));
-    const finalW = Math.max(30, maxW);
-    const finalH = finalW * (imageAspectRatio / targetRatio);
-    
-    setCrop({
-      x: (100 - finalW) / 2,
-      y: (100 - finalH) / 2,
-      width: finalW,
-      height: finalH,
-    });
+    // Check if croppingFile has a saved lastCrop
+    if (croppingFile && croppingFile.lastCrop) {
+      setCrop(croppingFile.lastCrop);
+    } else {
+      // Calculate initial 4:3 crop box centered on image
+      const imageAspectRatio = img.naturalWidth / img.naturalHeight;
+      const maxW = Math.min(80, 80 * (targetRatio / imageAspectRatio));
+      const finalW = Math.max(30, maxW);
+      const finalH = finalW * (imageAspectRatio / targetRatio);
+      
+      setCrop({
+        x: (100 - finalW) / 2,
+        y: (100 - finalH) / 2,
+        width: finalW,
+        height: finalH,
+      });
+    }
   };
 
   const handleCropSizeChange = (newWidth: number) => {
@@ -550,6 +579,7 @@ export default function Home() {
                       file: croppedFile,
                       status: "Recognized",
                       confidence: 0,
+                      lastCrop: crop,
                     }
                   : f
               )

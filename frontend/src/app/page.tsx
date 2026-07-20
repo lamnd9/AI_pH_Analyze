@@ -17,7 +17,8 @@ import {
   Search,
   Pencil,
   ArrowRight,
-  RefreshCw
+  RefreshCw,
+  Crop
 } from "lucide-react";
 import { translations, Language } from "./translations";
 
@@ -35,6 +36,7 @@ interface UploadedFile {
   confidence: number;     // AI recognition confidence
   status: "Recognized" | "Edited" | "Scanning" | "Error";
   file?: File;            // Keep original File reference for API uploading
+  originalFile?: File;    // Store the original unmodified upload for cropping
 }
 
 export default function Home() {
@@ -44,6 +46,11 @@ export default function Home() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedCardId, setSelectedCardId] = useState<string>(""); // Selected card focused reference
   const [zoomedFile, setZoomedFile] = useState<UploadedFile | null>(null); // For detail zoom overlay modal
+  const [croppingFile, setCroppingFile] = useState<UploadedFile | null>(null); // Image file being cropped
+  const [crop, setCrop] = useState({ x: 10, y: 10, width: 80, height: 60 }); // Crop coordinates (percent)
+  const [isDragging, setIsDragging] = useState(false); // Dragging crop box state
+  const [startPos, setStartPos] = useState({ x: 0, y: 0 }); // Drag starting position
+  const cropContainerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1); // A4 preview zoom scale for mobile layout
   const fileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -186,6 +193,7 @@ export default function Home() {
         confidence: 0,
         status: "Recognized",
         file, // Keep the file reference for API uploading
+        originalFile: file, // Keep the original file reference for cropping reset
       });
     }
 
@@ -328,6 +336,160 @@ export default function Home() {
         )
       );
     }
+  };
+
+  // Image cropping logic
+  const originalUrl = useMemo(() => {
+    if (croppingFile?.originalFile) {
+      return URL.createObjectURL(croppingFile.originalFile);
+    }
+    return croppingFile?.previewUrl || "";
+  }, [croppingFile]);
+
+  const [imgDims, setImgDims] = useState({ w: 1, h: 1 });
+  const imgRatio = useMemo(() => imgDims.w / imgDims.h, [imgDims]);
+  const targetRatio = 4 / 3;
+
+  const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    setImgDims({ w: img.naturalWidth, h: img.naturalHeight });
+    
+    // Calculate initial 4:3 crop box centered on image
+    const imageAspectRatio = img.naturalWidth / img.naturalHeight;
+    const maxW = Math.min(80, 80 * (targetRatio / imageAspectRatio));
+    const finalW = Math.max(30, maxW);
+    const finalH = finalW * (imageAspectRatio / targetRatio);
+    
+    setCrop({
+      x: (100 - finalW) / 2,
+      y: (100 - finalH) / 2,
+      width: finalW,
+      height: finalH,
+    });
+  };
+
+  const handleCropSizeChange = (newWidth: number) => {
+    const imageAspectRatio = imgRatio;
+    const newHeight = newWidth * (imageAspectRatio / targetRatio);
+    
+    // Avoid out of bounds height
+    if (newHeight > 100) return;
+
+    setCrop((prev) => {
+      const centerX = prev.x + prev.width / 2;
+      const centerY = prev.y + prev.height / 2;
+      
+      let newX = centerX - newWidth / 2;
+      let newY = centerY - newHeight / 2;
+      
+      newX = Math.max(0, Math.min(100 - newWidth, newX));
+      newY = Math.max(0, Math.min(100 - newHeight, newY));
+      
+      return {
+        x: newX,
+        y: newY,
+        width: newWidth,
+        height: newHeight,
+      };
+    });
+  };
+
+  const handleDragStart = (clientX: number, clientY: number) => {
+    setIsDragging(true);
+    setStartPos({ x: clientX, y: clientY });
+  };
+
+  const handleDragMove = (clientX: number, clientY: number) => {
+    if (!isDragging || !cropContainerRef.current) return;
+    
+    const rect = cropContainerRef.current.getBoundingClientRect();
+    const deltaX = ((clientX - startPos.x) / rect.width) * 100;
+    const deltaY = ((clientY - startPos.y) / rect.height) * 100;
+    
+    setCrop((prev) => {
+      let newX = prev.x + deltaX;
+      let newY = prev.y + deltaY;
+      
+      newX = Math.max(0, Math.min(100 - prev.width, newX));
+      newY = Math.max(0, Math.min(100 - prev.height, newY));
+      
+      return { ...prev, x: newX, y: newY };
+    });
+    
+    setStartPos({ x: clientX, y: clientY });
+  };
+
+  const handleDragEnd = () => {
+    setIsDragging(false);
+  };
+
+  const saveCrop = () => {
+    if (!croppingFile || !croppingFile.originalFile) return;
+
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = originalUrl;
+
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      
+      const sourceX = (crop.x / 100) * img.naturalWidth;
+      const sourceY = (crop.y / 100) * img.naturalHeight;
+      const sourceWidth = (crop.width / 100) * img.naturalWidth;
+      const sourceHeight = (crop.height / 100) * img.naturalHeight;
+      
+      canvas.width = sourceWidth;
+      canvas.height = sourceHeight;
+      
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(
+          img,
+          sourceX,
+          sourceY,
+          sourceWidth,
+          sourceHeight,
+          0,
+          0,
+          sourceWidth,
+          sourceHeight
+        );
+        
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const croppedFile = new File([blob], croppingFile.name, {
+              type: "image/jpeg",
+            });
+            const croppedPreviewUrl = URL.createObjectURL(blob);
+            
+            setUploadedFiles((prev) =>
+              prev.map((f) =>
+                f.id === croppingFile.id
+                  ? {
+                      ...f,
+                      previewUrl: croppedPreviewUrl,
+                      file: croppedFile,
+                      status: "Scanning" as const,
+                      confidence: 0,
+                    }
+                  : f
+              )
+            );
+            
+            const updatedFileObject = {
+              ...croppingFile,
+              previewUrl: croppedPreviewUrl,
+              file: croppedFile,
+              status: "Scanning" as const,
+              confidence: 0,
+            };
+            
+            analyzeFile(updatedFileObject);
+            setCroppingFile(null);
+          }
+        }, "image/jpeg", 0.95);
+      }
+    };
   };
 
   // Date state for Clinical Report Page (defaults to current local date)
@@ -684,7 +846,7 @@ export default function Home() {
                           alt={file.name}
                           className="w-full h-full object-cover"
                         />
-                        <div className={`absolute inset-0 bg-slate-950/20 flex items-center justify-center transition-opacity duration-205 ${file.id !== "mock-1" ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                        <div className={`absolute inset-0 bg-slate-950/20 flex items-center justify-center gap-3 transition-opacity duration-205 ${file.id !== "mock-1" ? "opacity-100" : "opacity-0 group-hover:opacity-100"
                           }`}>
                           <button
                             onClick={(e) => {
@@ -692,9 +854,24 @@ export default function Home() {
                               setZoomedFile(file);
                             }}
                             className="w-10 h-10 bg-white hover:bg-slate-50 text-blue-900 rounded-lg flex items-center justify-center shadow-md active:scale-90 transition-transform"
+                            title={lang === "vi" ? "Xem chi tiết" : "View Details"}
                           >
                             <Search className="w-5 h-5 stroke-[2.2]" />
                           </button>
+                          
+                          {/* Only allow cropping if the file was uploaded (has originalFile) */}
+                          {file.originalFile && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCroppingFile(file);
+                              }}
+                              className="w-10 h-10 bg-white hover:bg-slate-50 text-blue-900 rounded-lg flex items-center justify-center shadow-md active:scale-90 transition-transform"
+                              title={lang === "vi" ? "Cắt xén hình ảnh" : "Crop Image"}
+                            >
+                              <Crop className="w-5 h-5 stroke-[2.2]" />
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -1043,6 +1220,131 @@ export default function Home() {
             <div className="p-4 flex items-center justify-between font-mono text-xs text-slate-500 bg-slate-50 rounded-b-xl mt-2">
               <span>{t.step2.specimenLabel} <b className="text-slate-800">{zoomedFile.name}</b></span>
               <span>{t.step2.calibrationLabel} <b className="text-slate-800">75x25mm Grid</b></span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CROP OVERLAY MODAL */}
+      {croppingFile && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn"
+          onMouseMove={(e) => handleDragMove(e.clientX, e.clientY)}
+          onMouseUp={handleDragEnd}
+          onTouchMove={(e) => {
+            if (e.touches.length > 0) {
+              handleDragMove(e.touches[0].clientX, e.touches[0].clientY);
+            }
+          }}
+          onTouchEnd={handleDragEnd}
+        >
+          <div
+            className="relative max-w-2xl w-full bg-white rounded-2xl overflow-hidden shadow-2xl border border-slate-200 p-6 flex flex-col gap-4 select-none"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setCroppingFile(null)}
+              className="absolute top-4 right-4 z-10 p-2 bg-slate-950/10 hover:bg-rose-600 hover:text-white rounded-full text-slate-700 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">
+                {lang === "vi" ? "Cắt xén hình ảnh" : "Crop Image"}
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                {lang === "vi" 
+                  ? "Kéo khung đứt nét để di chuyển vùng cắt. Kéo thanh trượt Zoom để thay đổi kích thước vùng cắt." 
+                  : "Drag the crop box to move. Use the zoom slider to resize."}
+              </p>
+            </div>
+
+            {/* Cropping Workspace Container */}
+            <div 
+              className="relative border border-slate-200 bg-slate-950 rounded-xl overflow-hidden flex items-center justify-center select-none" 
+              style={{ minHeight: '300px', maxHeight: '50vh' }}
+            >
+              <div className="relative inline-block" ref={cropContainerRef}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={originalUrl}
+                  alt="Crop preview"
+                  onLoad={handleImageLoad}
+                  className="max-h-[50vh] max-w-full object-contain pointer-events-none"
+                />
+                
+                {/* Interactive Crop Box Selection Overlay */}
+                <div
+                  style={{
+                    left: `${crop.x}%`,
+                    top: `${crop.y}%`,
+                    width: `${crop.width}%`,
+                    height: `${crop.height}%`,
+                  }}
+                  className="absolute border-2 border-dashed border-yellow-400 bg-yellow-400/10 cursor-move shadow-[0_0_0_9999px_rgba(0,0,0,0.6)] flex items-center justify-center"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleDragStart(e.clientX, e.clientY);
+                  }}
+                  onTouchStart={(e) => {
+                    if (e.touches.length > 0) {
+                      handleDragStart(e.touches[0].clientX, e.touches[0].clientY);
+                    }
+                  }}
+                >
+                  {/* Grid Lines inside crop area */}
+                  <div className="w-full h-full border border-yellow-400/30 grid grid-cols-3 grid-rows-3 pointer-events-none">
+                    <div className="border-r border-b border-yellow-400/20"></div>
+                    <div className="border-r border-b border-yellow-400/20"></div>
+                    <div className="border-b border-yellow-400/20"></div>
+                    <div className="border-r border-b border-yellow-400/20"></div>
+                    <div className="border-r border-b border-yellow-400/20"></div>
+                    <div className="border-b border-yellow-400/20"></div>
+                    <div className="border-r border-yellow-400/20"></div>
+                    <div className="border-r border-yellow-400/20"></div>
+                    <div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Controls panel */}
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                  <span>{lang === "vi" ? "Kích thước vùng cắt (Zoom)" : "Crop Box Zoom"}</span>
+                  <span className="font-mono text-slate-500">{Math.round(crop.width)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="20"
+                  max="100"
+                  value={crop.width}
+                  onChange={(e) => handleCropSizeChange(parseFloat(e.target.value))}
+                  className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-900"
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                <span className="text-[11px] font-medium text-slate-400">
+                  {lang === "vi" ? "Tỉ lệ khoá cố định: 4:3 (Báo cáo A4)" : "Fixed aspect ratio: 4:3 (A4 Report)"}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setCroppingFile(null)}
+                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors active:scale-95"
+                  >
+                    {lang === "vi" ? "Huỷ" : "Cancel"}
+                  </button>
+                  <button
+                    onClick={saveCrop}
+                    className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-white bg-blue-900 hover:bg-blue-800 rounded-xl transition-colors shadow-sm active:scale-95"
+                  >
+                    {lang === "vi" ? "Lưu & Quét lại" : "Save & Re-scan"}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

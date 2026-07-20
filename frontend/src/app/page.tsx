@@ -39,6 +39,76 @@ interface UploadedFile {
   originalFile?: File;    // Store the original unmodified upload for cropping
 }
 
+// Utility function to auto-crop an image to a centered 4:3 aspect ratio on upload
+const autoCropImage = (file: File): Promise<{ croppedFile: File; previewUrl: string }> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const originalUrl = URL.createObjectURL(file);
+    img.src = originalUrl;
+    
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const targetRatio = 4 / 3;
+      const imageAspectRatio = img.naturalWidth / img.naturalHeight;
+      
+      // Calculate centered crop dimensions at 100% scale
+      let sourceWidth = img.naturalWidth;
+      let sourceHeight = img.naturalHeight;
+      let sourceX = 0;
+      let sourceY = 0;
+      
+      if (imageAspectRatio > targetRatio) {
+        // Landscape - wider than 4:3. Limit by height.
+        sourceHeight = img.naturalHeight;
+        sourceWidth = sourceHeight * targetRatio;
+        sourceX = (img.naturalWidth - sourceWidth) / 2;
+      } else {
+        // Portrait/Square - narrower than 4:3. Limit by width.
+        sourceWidth = img.naturalWidth;
+        sourceHeight = sourceWidth / targetRatio;
+        sourceY = (img.naturalHeight - sourceHeight) / 2;
+      }
+      
+      canvas.width = sourceWidth;
+      canvas.height = sourceHeight;
+      
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        // Draw white background
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.drawImage(
+          img,
+          sourceX,
+          sourceY,
+          sourceWidth,
+          sourceHeight,
+          0,
+          0,
+          sourceWidth,
+          sourceHeight
+        );
+      }
+      
+      canvas.toBlob((blob) => {
+        URL.revokeObjectURL(originalUrl); // clean up temp URL
+        if (blob) {
+          const croppedFile = new File([blob], file.name, { type: "image/jpeg" });
+          const previewUrl = URL.createObjectURL(blob);
+          resolve({ croppedFile, previewUrl });
+        } else {
+          resolve({ croppedFile: file, previewUrl: originalUrl });
+        }
+      }, "image/jpeg", 0.95);
+    };
+    
+    img.onerror = () => {
+      resolve({ croppedFile: file, previewUrl: originalUrl });
+    };
+  });
+};
+
 export default function Home() {
   const [currentStep, setCurrentStep] = useState<WorkflowStep>("upload");
   const [errorNotification, setErrorNotification] = useState<string | null>(null);
@@ -173,14 +243,16 @@ export default function Home() {
     }
   };
 
-  const processFiles = (fileList: FileList) => {
+  const processFiles = async (fileList: FileList) => {
     const newFiles: UploadedFile[] = [];
 
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
       const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
-      const previewUrl = URL.createObjectURL(file);
       const generatedNumber = 3881 + uploadedFiles.length + i;
+      
+      // Auto crop image to 4:3 on upload
+      const { croppedFile, previewUrl } = await autoCropImage(file);
 
       newFiles.push({
         id: `file-${Date.now()}-${i}`,
@@ -192,7 +264,7 @@ export default function Home() {
         run: "Run 1",
         confidence: 0,
         status: "Recognized",
-        file, // Keep the file reference for API uploading
+        file: croppedFile, // Store the auto-cropped file for API uploading
         originalFile: file, // Keep the original file reference for cropping reset
       });
     }

@@ -1208,13 +1208,6 @@ export default function Home() {
                 alt={zoomedFile.name}
                 className="w-full h-full object-contain"
               />
-              <div className="absolute inset-0 border border-emerald-500/20 pointer-events-none grid grid-cols-6 grid-rows-6">
-                {Array.from({ length: 36 }).map((_, i) => (
-                  <div key={i} className="border-t border-l border-emerald-500/10 font-mono text-[9px] text-emerald-500/40 p-0.5">
-                    {i % 6},{Math.floor(i / 6)}
-                  </div>
-                ))}
-              </div>
             </div>
             <div className="p-4 flex items-center justify-between font-mono text-xs text-slate-500 bg-slate-50 rounded-b-xl mt-2">
               <span>{t.step2.specimenLabel} <b className="text-slate-800">{zoomedFile.name}</b></span>

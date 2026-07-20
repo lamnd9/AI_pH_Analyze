@@ -342,6 +342,27 @@ export default function Home() {
     });
   };
 
+  const reAnalyzeFile = (file: UploadedFile) => {
+    setUploadedFiles((prev) =>
+      prev.map((f) =>
+        f.id === file.id ? { ...f, status: "Scanning" as const } : f
+      )
+    );
+    analyzeFile(file);
+  };
+
+  const handleRetryAllFailed = () => {
+    const failedFiles = uploadedFiles.filter((f) => f.status === "Error");
+    setUploadedFiles((prev) =>
+      prev.map((f) =>
+        f.status === "Error" ? { ...f, status: "Scanning" as const } : f
+      )
+    );
+    failedFiles.forEach((file) => {
+      analyzeFile(file);
+    });
+  };
+
   // Asynchronous fetch calling the FastAPI endpoint (includes dynamic ?lang parameter)
   const analyzeFile = async (file: UploadedFile) => {
     try {
@@ -931,13 +952,24 @@ export default function Home() {
           {/* STEP 2: REVIEW & EDIT RECOGNIZED DATA */}
           {currentStep === "review" && (
             <div className="max-w-6xl w-full mx-auto space-y-8 animate-fadeIn no-print">
-              <div>
-                <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-                  {t.step2.title}
-                </h1>
-                <p className="text-sm text-slate-500 mt-1.5">
-                  {t.step2.subtitle}
-                </p>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
+                    {t.step2.title}
+                  </h1>
+                  <p className="text-sm text-slate-500 mt-1.5">
+                    {t.step2.subtitle}
+                  </p>
+                </div>
+                {uploadedFiles.some((f) => f.status === "Error") && (
+                  <button
+                    onClick={handleRetryAllFailed}
+                    className="self-start sm:self-center inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-all shadow-sm active:scale-95 duration-150"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin-reverse" />
+                    <span>{lang === "vi" ? "Thử lại các ảnh lỗi" : "Retry Failed"}</span>
+                  </button>
+                )}
               </div>
 
               {/* Data Cards Grid */}
@@ -992,29 +1024,44 @@ export default function Home() {
                         {/* Status Row */}
                         <div className="flex items-center justify-between">
                           {/* Badge Dynamic Rendering */}
-                          {file.status === "Recognized" && (
-                            <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded bg-emerald-50 text-emerald-700 border border-emerald-100">
-                              {t.step2.recognized}
-                            </span>
-                          )}
-                          {file.status === "Edited" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-blue-50 text-blue-700 border border-blue-100">
-                              <Pencil className="w-3 h-3" />
-                              {t.step2.edited}
-                            </span>
-                          )}
-                          {file.status === "Scanning" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-amber-50 text-amber-700 border border-amber-100">
-                              <RefreshCw className="w-3 h-3 animate-spin" />
-                              {t.step2.scanning}
-                            </span>
-                          )}
-                          {file.status === "Error" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-rose-50 text-rose-700 border border-rose-100">
-                              <AlertCircle className="w-3.5 h-3.5" />
-                              {t.step2.ocrError}
-                            </span>
-                          )}
+                          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                            {file.status === "Recognized" && (
+                              <span className="inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                {t.step2.recognized}
+                              </span>
+                            )}
+                            {file.status === "Edited" && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-blue-50 text-blue-700 border border-blue-100">
+                                <Pencil className="w-3 h-3" />
+                                {t.step2.edited}
+                              </span>
+                            )}
+                            {file.status === "Scanning" && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-amber-50 text-amber-700 border border-amber-100">
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                                {t.step2.scanning}
+                              </span>
+                            )}
+                            {file.status === "Error" && (
+                              <>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-rose-50 text-rose-700 border border-rose-100">
+                                  <AlertCircle className="w-3.5 h-3.5" />
+                                  {t.step2.ocrError}
+                                </span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    reAnalyzeFile(file);
+                                  }}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-all active:scale-95 shadow-sm"
+                                  title={lang === "vi" ? "Thử lại quét mẫu này" : "Retry this scan"}
+                                >
+                                  <RefreshCw className="w-3 h-3" />
+                                  <span>{lang === "vi" ? "Thử lại" : "Retry"}</span>
+                                </button>
+                              </>
+                            )}
+                          </div>
 
                           <span className="font-mono text-xs text-slate-400">
                             Conf: {file.confidence}%

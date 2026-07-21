@@ -1,12 +1,32 @@
 # LabPrint - Hệ Thống Phân Tích Chỉ Số pH Mỹ Phẩm Bằng AI
 
-Dự án fullstack hỗ trợ phân tích hình ảnh máy đo pH, tự động nhận diện Mã số mẫu và Lần đo thông qua Google Gemini AI (mô hình `gemini-3.1-pro-preview` / `gemini-3.5-flash`), tối ưu chất lượng ảnh tiết kiệm mực in và tự động gom nhóm để in báo cáo A4 chuyên nghiệp.
+Dự án fullstack hỗ trợ phân tích hình ảnh máy đo pH, tự động nhận diện Mã số mẫu và Lần đo thông qua Google Gemini AI hoặc OCR.Space API, tối ưu chất lượng ảnh tiết kiệm mực in và tự động gom nhóm để in báo cáo A4 chuyên nghiệp.
 
 ---
 
 ## 🛠 Cấu trúc dự án
-* **/backend:** Máy chủ Python FastAPI chịu trách nhiệm xử lý làm sáng, tương phản ảnh bằng Pillow và giao tiếp với Google Gemini API.
+* **/backend:** Máy chủ Python FastAPI tái cấu trúc mô-đun hóa (`services/`):
+  * `services/gemini_service.py`: Xử lý phân tích bằng Google Gemini 3.5 Flash SDK.
+  * `services/ocr_space_service.py`: Xử lý phân tích bằng OCR.Space API (Engine 3) & bộ trích xuất regex văn bản thô.
+  * `main.py`: Tự động điều hướng Provider dựa vào biến môi trường `OCR_PROVIDER`.
 * **/frontend:** Ứng dụng Next.js (React + Tailwind CSS) cung cấp giao diện tải ảnh, cắt ảnh (4:3), sửa đổi thông tin và in ấn báo cáo.
+
+---
+
+## ⚙️ Thiết lập Bộ xử lý OCR (OCR Provider)
+
+Trong tệp `backend/.env` (hoặc biến môi trường trên Render), bạn có thể lựa chọn dịch vụ nhận diện:
+
+```env
+# Chọn Provider: 'gemini' (Mặc định) hoặc 'ocr_space'
+OCR_PROVIDER=gemini
+
+# Khóa Google Gemini API
+GEMINI_API_KEY=AIzaSy...
+
+# Khóa OCR.Space API (nếu dùng provider ocr_space)
+OCR_SPACE_API_KEY=K86109868088957
+```
 
 ---
 
@@ -36,12 +56,7 @@ Dự án fullstack hỗ trợ phân tích hình ảnh máy đo pH, tự động 
    pip install -r requirements.txt
    ```
 
-4. Thiết lập biến môi trường:
-   * Tạo tệp tên là `.env` trong thư mục `backend/`
-   * Thêm khóa Gemini API của bạn vào đó:
-     ```env
-     GEMINI_API_KEY=mã_api_key_gemini_của_bạn
-     ```
+4. Thiết lập biến môi trường tệp `.env` trong thư mục `backend/`.
 
 5. Khởi động server FastAPI:
    ```bash
@@ -73,7 +88,6 @@ Dự án fullstack hỗ trợ phân tích hình ảnh máy đo pH, tự động 
 
 ## 🔍 Kiểm tra hoạt động
 1. Mở trình duyệt web và truy cập địa chỉ: [http://localhost:3000](http://localhost:3000).
-2. Tải lên ảnh chụp cốc đo pH (có nhãn ghi mã mẫu nằm trong khung màu xanh).
+2. Tải lên ảnh chụp cốc đo pH (có nhãn ghi mã mẫu).
 3. Nhấp **Bắt đầu nhận diện AI** để quét ảnh.
-4. Di chuột qua card ảnh, bấm **Crop (Cắt ảnh)** nếu cần điều chỉnh vùng hiển thị khớp khung in 4:3.
-5. Kiểm tra kết quả trong biểu mẫu A4 và bấm **In tất cả các trang** để kết xuất PDF/In giấy.
+4. Kiểm tra kết quả trong biểu mẫu A4 và bấm **In tất cả các trang** để kết xuất PDF/In giấy.

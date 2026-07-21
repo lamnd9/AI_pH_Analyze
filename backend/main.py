@@ -144,11 +144,11 @@ async def analyze_image(
         # Initialize the Gemini client
         client = genai.Client()
         
-        logger.info(f"Calling Gemini API (gemini-3.1-pro-preview) in '{lang}'...")
+        logger.info(f"Calling Gemini API (gemini-3.5-flash) in '{lang}'...")
         
         # Call the Gemini model with structured output configuration
         response = client.models.generate_content(
-            model="gemini-3.1-pro-preview",
+            model="gemini-3.5-flash",
             contents=[image, prompt_instructions],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",

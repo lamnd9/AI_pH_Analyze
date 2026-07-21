@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+import asyncio
 import httpx
 from pydantic import BaseModel, Field
 
@@ -8,6 +9,15 @@ logger = logging.getLogger("backend.ocr_space")
 
 # Default API key provided by user if not specified in environment
 DEFAULT_OCR_SPACE_KEY = "K86109868088957"
+
+# Lazy-initialized Async Lock to serialize OCR.Space requests (Free Plan limit: 1 concurrent active request)
+_ocr_space_lock = None
+
+def get_ocr_space_lock():
+    global _ocr_space_lock
+    if _ocr_space_lock is None:
+        _ocr_space_lock = asyncio.Lock()
+    return _ocr_space_lock
 
 
 class GeminiLabelExtraction(BaseModel):
@@ -70,12 +80,11 @@ async def analyze_with_ocr_space(
     lang: str = "en"
 ) -> GeminiLabelExtraction:
     """
-    Calls OCR.Space API with OCREngine=3, retrieves raw text, and parses it for Sample ID & Run.
+    Calls OCR.Space API with OCREngine=3 sequentially (serialized via asyncio.Lock)
+    to comply with Free Plan limit of 1 active concurrent request.
     """
     api_key = os.getenv("OCR_SPACE_API_KEY", DEFAULT_OCR_SPACE_KEY)
     
-    logger.info(f"Calling OCR.Space API (OCREngine=3) for file: {filename}...")
-
     url = "https://api.ocr.space/parse/image"
     payload = {
         "apikey": api_key,
@@ -87,40 +96,46 @@ async def analyze_with_ocr_space(
         "file": (filename, image_bytes, content_type)
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            response = await client.post(url, data=payload, files=files)
+    # Acquire lock to ensure only 1 request is sent to OCR.Space at a time
+    async with get_ocr_space_lock():
+        logger.info(f"Acquired lock. Calling OCR.Space API (OCREngine=3) sequentially for file: {filename}...")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, data=payload, files=files)
             
-        if response.status_code != 200:
-            err_msg = f"OCR.Space API returned HTTP status {response.status_code}: {response.text}"
-            logger.error(err_msg)
-            raise ValueError(err_msg)
+            # Small cooldown pause to allow OCR.Space server to clear active request count
+            await asyncio.sleep(0.3)
 
-        data = response.json()
-        logger.info(f"OCR.Space response status: {data.get('OCRExitCode')}")
+            if response.status_code != 200:
+                err_msg = f"OCR.Space API returned HTTP status {response.status_code}: {response.text}"
+                logger.error(err_msg)
+                raise ValueError(err_msg)
 
-        if data.get("IsErroredOnProcessing"):
-            err_details = data.get("ErrorMessage") or data.get("ErrorDetails") or "OCR.Space processing error"
-            logger.error(f"OCR.Space error: {err_details}")
-            raise ValueError(f"OCR.Space error: {err_details}")
+            data = response.json()
+            logger.info(f"OCR.Space response status: {data.get('OCRExitCode')}")
 
-        parsed_results = data.get("ParsedResults", [])
-        if not parsed_results:
-            raw_text = ""
-        else:
-            raw_text = parsed_results[0].get("ParsedText", "")
+            if data.get("IsErroredOnProcessing"):
+                err_details = data.get("ErrorMessage") or data.get("ErrorDetails") or "OCR.Space processing error"
+                logger.error(f"OCR.Space error: {err_details}")
+                raise ValueError(f"OCR.Space error: {err_details}")
 
-        sample_id, run, confidence = parse_raw_ocr_text(raw_text)
+            parsed_results = data.get("ParsedResults", [])
+            if not parsed_results:
+                raw_text = ""
+            else:
+                raw_text = parsed_results[0].get("ParsedText", "")
 
-        return GeminiLabelExtraction(
-            sample_id=sample_id,
-            measurement_run=run,
-            confidence=confidence
-        )
+            sample_id, run, confidence = parse_raw_ocr_text(raw_text)
 
-    except Exception as e:
-        logger.error(f"OCR.Space analysis failed: {e}")
-        if lang == "vi":
-            raise ValueError(f"Xử lý OCR.Space thất bại: {str(e)}")
-        else:
-            raise ValueError(f"OCR.Space analysis failed: {str(e)}")
+            return GeminiLabelExtraction(
+                sample_id=sample_id,
+                measurement_run=run,
+                confidence=confidence
+            )
+
+        except Exception as e:
+            logger.error(f"OCR.Space analysis failed: {e}")
+            if lang == "vi":
+                raise ValueError(f"Xử lý OCR.Space thất bại: {str(e)}")
+            else:
+                raise ValueError(f"OCR.Space analysis failed: {str(e)}")

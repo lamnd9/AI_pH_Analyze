@@ -25,7 +25,7 @@ OCR_PROVIDER=gemini
 GEMINI_API_KEY=AIzaSy...
 
 # Khóa OCR.Space API (nếu dùng provider ocr_space)
-OCR_SPACE_API_KEY=K86109868088957
+OCR_SPACE_API_KEY=K86...
 ```
 
 ---

@@ -146,8 +146,8 @@ async def analyze_image(
         
         logger.info(f"Calling Gemini API (gemini-3.5-flash) in '{lang}'...")
         
-        # Call the Gemini model with structured output configuration
-        response = client.models.generate_content(
+        # Call the Gemini model asynchronously with structured output configuration
+        response = await client.aio.models.generate_content(
             model="gemini-3.5-flash",
             contents=[image, prompt_instructions],
             config=types.GenerateContentConfig(

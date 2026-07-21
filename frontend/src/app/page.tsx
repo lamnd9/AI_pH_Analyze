@@ -147,6 +147,19 @@ export default function Home() {
   // Initial file list (starts empty for production use)
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
+  // Silent health check ping to wake up backend (prevents Render cold start latency when user clicks AI analyze)
+  React.useEffect(() => {
+    const pingBackendHealth = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
+        await fetch(`${apiUrl}/api/health`);
+      } catch (err) {
+        console.log("Background health check ping:", err);
+      }
+    };
+    pingBackendHealth();
+  }, []);
+
   // Listen to croppingFile changes to initialize crop box to its last saved coordinates
   React.useEffect(() => {
     if (croppingFile && croppingFile.lastCrop) {

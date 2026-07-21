@@ -6,8 +6,11 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from PIL import Image
+from PIL import Image, ImageEnhance
+import base64
 from dotenv import load_dotenv
+
+from services import analyze_with_gemini, analyze_with_ocr_space, GeminiLabelExtraction
 
 # Suppress warnings related to Python 3.9 EOL and urllib3 LibreSSL
 warnings.filterwarnings("ignore", category=FutureWarning, module="google.auth")
@@ -26,8 +29,8 @@ logging.getLogger("google_genai").setLevel(logging.ERROR)
 
 app = FastAPI(
     title="LabPrint AI pH Analyze Backend",
-    description="Python FastAPI backend for image analysis using the official Google GenAI SDK",
-    version="0.3.0",
+    description="Python FastAPI backend supporting Gemini AI and OCR.Space providers",
+    version="0.4.0",
 )
 
 app.add_middleware(
@@ -41,20 +44,9 @@ app.add_middleware(
 class HealthResponse(BaseModel):
     status: str
     service: str
+    ocr_provider: str
     gemini_configured: bool
-
-
-# Schema used strictly by the Gemini API for structured extraction
-class GeminiLabelExtraction(BaseModel):
-    sample_id: str = Field(
-        description="The sample ID code written in the blue box, e.g., '3878/16'"
-    )
-    measurement_run: int = Field(
-        description="The run number, must be either 1 or 2"
-    )
-    confidence: float = Field(
-        description="Confidence score between 0.0 and 1.0 based on how clear the text is"
-    )
+    ocr_space_configured: bool
 
 
 # Final schema returned by the FastAPI server to the Next.js frontend
@@ -70,14 +62,20 @@ class SampleLabelAnalysis(BaseModel):
 @app.get("/api/health", response_model=HealthResponse)
 async def health_check():
     """
-    Health check endpoint to verify backend service status and API configuration.
+    Health check endpoint to verify backend service status and active OCR provider.
     """
-    api_key_set = bool(os.getenv("GEMINI_API_KEY"))
-    logger.info(f"Health check endpoint hit. Gemini API key configured: {api_key_set}")
+    gemini_key_set = bool(os.getenv("GEMINI_API_KEY"))
+    ocr_space_key_set = bool(os.getenv("OCR_SPACE_API_KEY", "K86109868088957"))
+    provider = os.getenv("OCR_PROVIDER", "gemini").strip().lower()
+
+    logger.info(f"Health check endpoint hit. Provider: {provider}, Gemini key: {gemini_key_set}, OCR.Space key: {ocr_space_key_set}")
+    
     return HealthResponse(
         status="online",
         service="LabPrint Backend",
-        gemini_configured=api_key_set
+        ocr_provider=provider,
+        gemini_configured=gemini_key_set,
+        ocr_space_configured=ocr_space_key_set
     )
 
 
@@ -87,11 +85,11 @@ async def analyze_image(
     lang: str = Query("en", description="Localization language query parameter ('en' or 'vi')")
 ):
     """
-    Endpoint to receive a lab pH image and process it via the Gemini model
-    with strict Structured Outputs using the official google-genai SDK.
-    Supports English and Vietnamese instruction localized prompts.
+    Endpoint to receive a lab pH image and process it via the configured OCR provider
+    (Gemini API or OCR.Space Engine 3).
     """
-    logger.info(f"Received file for analysis: {file.filename}, type: {file.content_type}, lang: {lang}")
+    provider = os.getenv("OCR_PROVIDER", "gemini").strip().lower()
+    logger.info(f"Received file for analysis: {file.filename}, type: {file.content_type}, lang: {lang}, provider: {provider}")
 
     # Localized file type validation error
     if not file.content_type or not file.content_type.startswith("image/"):
@@ -103,97 +101,53 @@ async def analyze_image(
         logger.warning(err_msg)
         raise HTTPException(status_code=400, detail=err_msg)
 
-    # Localized API Key validation error
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        if lang == "vi":
-            err_msg = "Thiếu khóa Gemini API. Vui lòng thiết lập biến môi trường GEMINI_API_KEY trên Render."
-        else:
-            err_msg = "Missing Gemini API Key. Please set the GEMINI_API_KEY environment variable on Render."
-        
-        logger.warning(err_msg)
-        raise HTTPException(status_code=500, detail=err_msg)
-
     try:
-        from google import genai
-        from google.genai import types
-        
-        # Read the file contents and convert into a PIL Image
+        # Read the file contents into bytes
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
         logger.info(f"Loaded image successfully: {image.format} - {image.size}")
 
-        # Dynamically switch instructions prompt based on active language parameter
-        if lang == "vi":
-            prompt_instructions = (
-                "Bạn là một trợ lý phòng thí nghiệm chuyên nghiệp. Hãy phân tích hình ảnh cốc đo pH này. "
-                "Xác định nhãn viết tay nằm bên trong khung viền màu xanh. Trích xuất:\n"
-                "1. Mã số mẫu (thường viết ở dòng đầu tiên của nhãn dán màu xanh, ví dụ '3878/16' hoặc '3884/26').\n"
-                "2. Lần đo (thường được viết ở dòng thứ hai hoặc kế bên, có giá trị là số 1 hoặc 2).\n"
-                "Trả về kết quả có cấu trúc khớp chính xác với định dạng JSON được yêu cầu."
+        # Dispatch to the configured provider (gemini vs ocr_space)
+        if provider == "ocr_space":
+            logger.info("Executing analysis via OCR.Space Service (Engine 3)...")
+            parsed_result = await analyze_with_ocr_space(
+                image_bytes=contents,
+                filename=file.filename or "sample.jpg",
+                content_type=file.content_type or "image/jpeg",
+                lang=lang
             )
         else:
-            prompt_instructions = (
-                "You are a professional laboratory assistant. Analyze this image of a pH measurement cup. "
-                "Locate the handwritten label inside the blue bounding box. Extract:\n"
-                "1. The Sample ID (usually written on the first line inside the blue box, like '3878/16' or '3884/26').\n"
-                "2. The Measurement Run number (usually written on the second line or next to the ID, strictly '1' or '2').\n"
-                "Return the data structured precisely matching the JSON schema."
+            logger.info("Executing analysis via Gemini AI Service (gemini-3.5-flash)...")
+            parsed_result = await analyze_with_gemini(
+                image=image,
+                lang=lang
             )
 
-        # Initialize the Gemini client
-        client = genai.Client()
-        
-        logger.info(f"Calling Gemini API (gemini-3.5-flash) in '{lang}'...")
-        
-        # Call the Gemini model asynchronously with structured output configuration
-        response = await client.aio.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=[image, prompt_instructions],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=GeminiLabelExtraction,
-                temperature=0.1,
-            ),
-        )
-
-        parsed_result = response.parsed
-        if not parsed_result:
-            if lang == "vi":
-                err_msg = "Mô hình Gemini không trả về dữ liệu cấu trúc."
-            else:
-                err_msg = "The Gemini model failed to return structured metadata."
-            logger.error(err_msg)
-            raise HTTPException(status_code=500, detail=err_msg)
-
-        logger.info(f"Successfully extracted metadata from Gemini: {parsed_result}")
+        logger.info(f"Successfully extracted metadata ({provider}): {parsed_result}")
 
         # Image enhancement: Ink-Saver mode + text contrast boost
-        from PIL import ImageEnhance
-        import base64
-
         # Convert to Grayscale (L) first to match Saturation = 0 and save all color ink
-        image = image.convert("L")
+        enhanced_image = image.convert("L")
 
         # 1. Apply custom transfer curve (Levels adjustment):
         # Deepen dark values (p < 50) to keep text/digits solid black.
         # Shift and stretch mid-to-bright values aggressively to push them to pure white (255) to brighten LCD screens.
-        image = image.point(lambda p: int(p * 0.5) if p < 50 else min(255, int((p - 50) * 2.1 + 110)))
+        enhanced_image = enhanced_image.point(lambda p: int(p * 0.5) if p < 50 else min(255, int((p - 50) * 2.1 + 110)))
 
         # Convert back to RGB mode for compatibility with standard browsers and canvas overlays
-        image = image.convert("RGB")
+        enhanced_image = enhanced_image.convert("RGB")
 
         # 2. Boost contrast by 40% to make the text and screen digits stand out sharp against the whited-out background
-        contrast_enhancer = ImageEnhance.Contrast(image)
-        image = contrast_enhancer.enhance(1.4)
+        contrast_enhancer = ImageEnhance.Contrast(enhanced_image)
+        enhanced_image = contrast_enhancer.enhance(1.4)
 
         # 3. Enhance sharpness by 50% to make the handwriting edges crisp
-        sharpness_enhancer = ImageEnhance.Sharpness(image)
-        image = sharpness_enhancer.enhance(1.5)
+        sharpness_enhancer = ImageEnhance.Sharpness(enhanced_image)
+        enhanced_image = sharpness_enhancer.enhance(1.5)
 
         # Encode processed image to base64
         buffered = io.BytesIO()
-        image.save(buffered, format="JPEG", quality=90)
+        enhanced_image.save(buffered, format="JPEG", quality=90)
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
         enhanced_base64 = f"data:image/jpeg;base64,{img_str}"
 
@@ -207,7 +161,7 @@ async def analyze_image(
 
     except Exception as e:
         error_str = str(e)
-        logger.error(f"Error occurred during Gemini analysis: {error_str}")
+        logger.error(f"Error occurred during analysis ({provider}): {error_str}")
         
         # Parse quota/rate limit error (429 RESOURCE_EXHAUSTED)
         if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str or "Quota exceeded" in error_str:
@@ -241,8 +195,8 @@ async def analyze_image(
 
         # Parse 503 UNAVAILABLE Server Overload error
         if "503" in error_str or "UNAVAILABLE" in error_str:
-            msg_vi = "Hệ thống AI của Google hiện đang bị quá tải tạm thời. Vui lòng thử lại sau vài giây."
-            msg_en = "Google AI models are currently experiencing high demand. Please try again in a few seconds."
+            msg_vi = "Hệ thống AI hiện đang bị quá tải tạm thời. Vui lòng thử lại sau vài giây."
+            msg_en = "AI service is currently experiencing high demand. Please try again in a few seconds."
             detail_msg = msg_vi if lang == "vi" else msg_en
             
             return JSONResponse(
@@ -256,8 +210,8 @@ async def analyze_image(
             )
 
         if lang == "vi":
-            err_msg = f"Phân tích Gemini API thất bại: {error_str}"
+            err_msg = f"Phân tích ảnh thất bại ({provider}): {error_str}"
         else:
-            err_msg = f"Gemini API analysis failed: {error_str}"
+            err_msg = f"Image analysis failed ({provider}): {error_str}"
         
         raise HTTPException(status_code=500, detail=err_msg)
